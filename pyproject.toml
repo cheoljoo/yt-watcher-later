@@ -1,0 +1,6 @@
+[project]
+name = "yt-watcher-later"
+version = "0.1.0"
+description = "YouTube 재생목록 영상을 매일 수집해 스크립트 저장·Claude 요약·분류·리포트를 만드는 도구"
+requires-python = ">=3.13"
+dependencies = []

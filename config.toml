@@ -1,0 +1,10 @@
+# 처리 대상 재생목록 (공개/일부공개 -> 쿠키 불필요). 여기에 영상을 저장해 두면 된다.
+playlist_url = "https://www.youtube.com/playlist?list=PLd1vTtizPwPU"
+
+# 비공개 목록(WL 등)을 읽어야 할 때만 쿠키 파일 경로를 지정. 비워두면 쿠키를 쓰지 않는다.
+cookies = ""
+
+langs = ["ko", "en"]
+max_comments = 40
+model = "sonnet"
+sleep_between_videos = 5
