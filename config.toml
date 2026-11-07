@@ -1,5 +1,4 @@
-# 처리 대상 재생목록 (공개/일부공개 -> 쿠키 불필요). 여기에 영상을 저장해 두면 된다.
-playlist_url = "https://www.youtube.com/playlist?list=PLd1vTtizPwPU"
+# 전역 설정은 반드시 [[playlists]] 위에 둔다 (TOML: 표 아래 키는 그 표에 속함)
 
 # 비공개 목록(WL 등)을 읽어야 할 때만 쿠키 파일 경로를 지정. 비워두면 쿠키를 쓰지 않는다.
 cookies = ""
@@ -7,4 +6,19 @@ cookies = ""
 langs = ["ko", "en"]
 max_comments = 40
 model = "sonnet"
-sleep_between_videos = 5
+
+# 병렬 처리. 수집(yt-dlp)은 429가 나면 자동으로 병렬 수를 줄이고, 잠잠하면 다시 늘린다.
+parallel_collect = 3          # 수집 시작 병렬 수 (상한)
+parallel_analyze = 2          # Claude 분석 병렬 수
+cooldown_sec = 60             # 429 발생 후 쉬는 시간
+
+# 처리 대상 재생목록 (공개/일부공개 -> 쿠키 불필요). owner = 이 목록에 영상을 모아 두는 사람.
+[[playlists]]
+owner = "cheoljoo"
+name  = "my-watch-later"
+url   = "https://www.youtube.com/playlist?list=PLd1vTtizPwPU"
+
+[[playlists]]
+owner = "cga1434"
+name  = "cga1434-watch-later"
+url   = "https://www.youtube.com/playlist?list=PLND2fODPD6LA"
