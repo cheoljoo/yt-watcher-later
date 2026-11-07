@@ -25,11 +25,11 @@ def macro_block(con, day=None):
     ci = cur["phase_index"] if cur else None
     n = len(CYCLE)
     svg = "<svg viewBox='0 0 520 232' width='100%' style='max-width:640px' role=img aria-label='매크로 주기 곡선'>"
-    svg += f"<line x1=30 y1=100 x2=490 y2=100 stroke=currentColor stroke-dasharray='4 4' opacity=.35/><text x=492 y=104 font-size=10 fill=currentColor opacity=.6>평균</text>"
+    svg += f"<line x1=30 y1=100 x2=490 y2=100 stroke=currentColor stroke-dasharray='4 4' opacity=.35 /><text x=492 y=104 font-size=10 fill=currentColor opacity=.6>평균</text>"
     svg += "<text x=30 y=22 font-size=10 fill=currentColor opacity=.6>▲ 과열·정점</text><text x=30 y=198 font-size=10 fill=currentColor opacity=.6>▼ 침체·저점</text>"
     for i, (name, _) in enumerate(CYCLE):
         pts = " ".join("%.1f,%.1f" % _wave_xy((i + k / 16) / n) for k in range(17))
-        svg += f"<polyline points='{pts}' fill=none stroke='{COLORS[i]}' stroke-width={9 if i == ci else 5} stroke-linecap=round opacity={1 if i == ci else .6}/>"
+        svg += f"<polyline points='{pts}' fill=none stroke='{COLORS[i]}' stroke-width={9 if i == ci else 5} stroke-linecap='round' opacity={1 if i == ci else .6} />"
         mx, _y = _wave_xy((i + .5) / n)
         svg += f"<text x={mx:.0f} y=222 text-anchor=middle font-size=11 fill=currentColor font-weight={'700' if i == ci else '400'}>{i + 1}. {e(name)}</text>"
     for h in hist[1:]:                                    # 최근 위치(흐리게)
