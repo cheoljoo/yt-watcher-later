@@ -56,6 +56,10 @@ PROMPT = """당신은 YouTube 영상 분석가입니다. 아래 입력(제목/�
 - 영상에 없는 내용을 지어내지 마세요.
 """
 
+class UsageLimit(RuntimeError): pass
+
+def _limit(msg): m = msg.lower(); return "429" in m or "usage limit" in m or "rate limit" in m
+
 def analyze(video, collected, vocab, today, model="sonnet"):
     info, cm = collected["info"], collected["info"].get("comments") or []
     comments = "\n".join(f"- ({c.get('like_count',0)}👍) {c.get('text','')[:300]}" for c in cm[:40]) or "(없음)"
@@ -67,9 +71,11 @@ def analyze(video, collected, vocab, today, model="sonnet"):
                         "--output-format", "json", "--json-schema", json.dumps(SCHEMA)],
                        input=body, capture_output=True, text=True, timeout=900)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout)[-500:])
+        msg = (r.stderr or r.stdout)[-500:]
+        raise (UsageLimit if _limit(msg) else RuntimeError)(msg)
     j = json.loads(r.stdout)
     if j.get("is_error"):
-        raise RuntimeError(str(j.get("result"))[-500:])
+        msg = str(j.get("result"))[-500:] + str(j.get("api_error_status") or "")
+        raise (UsageLimit if _limit(msg) or j.get("api_error_status") == 429 else RuntimeError)(msg)
     out = j.get("structured_output") or json.loads(j["result"])
     return out
