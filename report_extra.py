@@ -78,13 +78,13 @@ def build_checks(con):
     body = f"<h1>⏳ 앞으로 확인할 것</h1><p class=meta>시간순(확인일 빠른 순) · 미확인 {len(pend)}개 · <a href='index.html'>목록</a> · <a href='checks_done.html'>확인한 것 ›</a> · <a href='indicators.html'>지표 ›</a></p>" + LEGEND
     if due: body += f"<section class='card due'><h3>⏰ 지금 확인할 시점이 된 것 ({len(due)})</h3>{_rows(due)}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (시간순)</h3>{_rows(pend)}</section>"
-    (OUT / "checks_pending.html").write_text(page("앞으로 확인할 것", body), encoding="utf-8")
+    (OUT / "checks_pending.html").write_text(page("앞으로 확인할 것", body, "⏳"), encoding="utf-8")
     dn = con.execute(SEL + " WHERE c.status!='pending' ORDER BY c.checked_at DESC, c.id").fetchall()
     tdy = [c for c in dn if (c["checked_at"] or "").startswith(today)]
     body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 오늘 확인한 것이 맨 앞, 그 아래에 오늘 것을 포함한 전체를 시간순으로 · <a href='index.html'>목록</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
     body += f"<section class='card'><h3>🆕 오늘({today}) 확인한 것 ({len(tdy)})</h3>{_rows(tdy) if tdy else '<p class=meta>오늘 확인한 항목이 없습니다. <code>uv run check.py set ID --status ...</code> 로 기록합니다.</p>'}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (확인한 순서, 오래된 것부터)</h3>{_rows(sorted(dn, key=lambda c: (c['checked_at'] or '', c['id']))) if dn else '<p class=meta>아직 없습니다.</p>'}</section>"
-    (OUT / "checks_done.html").write_text(page("확인한 것", body), encoding="utf-8")
+    (OUT / "checks_done.html").write_text(page("확인한 것", body, "✅"), encoding="utf-8")
 
 def _fmt(v): return "-" if v is None else (f"{v:,.2f}".rstrip("0").rstrip("."))
 
@@ -113,7 +113,7 @@ def build_indicators(con):
     body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>목록</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a></p>" + IND_LEGEND + macro_block(con)
     if not last:
         body += "<p class=meta>아직 수집된 지표 값이 없습니다(일일 실행에서 수집).</p>"
-        (OUT / "indicators.html").write_text(page("지표", body), encoding="utf-8"); return
+        (OUT / "indicators.html").write_text(page("지표", body, "📊"), encoding="utf-8"); return
     rows = con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning
                           FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE v.date=? ORDER BY i.importance DESC, i.category, i.name""", (last,)).fetchall()
     srcs = lambda iid: con.execute("SELECT s.video_id, vd.title, vd.processed_date FROM indicator_sources s JOIN videos vd ON vd.id=s.video_id WHERE s.indicator_id=?", (iid,)).fetchall()
@@ -125,7 +125,7 @@ def build_indicators(con):
     body += f"<section class=card><h3>📋 전체 지표·종목 ({len(rows)}) — 위 항목 포함</h3>{head}{''.join(_ind_card(r, r, srcs(r['id'])) for r in rows)}</table></section>"
     pend = con.execute("SELECT count(*) FROM indicators WHERE active=1").fetchone()[0]
     body += f"<p class=meta>등록된 지표 {pend}개 · 값을 구하지 못한 지표는 그날 건너뜁니다 · 값은 모델이 아는 최근 값이며 실시간이 아닙니다(🕰️ 표시는 기준일이 90일 넘게 오래된 값 — 경고도 참고용으로만 볼 것).</p>"
-    (OUT / "indicators.html").write_text(page("지표 대시보드", body), encoding="utf-8")
+    (OUT / "indicators.html").write_text(page("지표 대시보드", body, "📊"), encoding="utf-8")
 
 def build(con):
     build_checks(con); build_indicators(con)

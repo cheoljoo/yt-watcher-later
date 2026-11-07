@@ -6,7 +6,11 @@ OUT = pathlib.Path("reports")
 CAT_ICON = {"경제": "📈", "AI": "🤖", "IT": "💻", "정치·사회": "🏛️", "과학·건강": "🔬", "기타": "📌"}
 KIND_ICON = {"indicator": "📊", "stock": "💹", "event": "📅"}
 ST_ICON = {"pending": "⏳", "confirmed": "✅", "refuted": "❌", "partial": "➗", "unknown": "❔"}
-FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='52'%3E%E2%96%B6%EF%B8%8F%3C/text%3E%3C/svg%3E"
+def favicon(emoji):
+    """이모지를 SVG 파비콘(data URI)으로. 따옴표까지 모두 퍼센트 인코딩해 속성이 깨지지 않게 한다."""
+    import urllib.parse
+    svg = f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>{emoji}</text></svg>"
+    return "data:image/svg+xml," + urllib.parse.quote(svg, safe="")
 CSS = """:root{--bg:#fafaf8;--fg:#1c1c1a;--mu:#6b6b66;--card:#fff;--bd:#e3e2dc;--ac:#2b5fd9;--chip:#eef1fa}
 @media(prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mu:#9a9990;--card:#1f1f1c;--bd:#33332f;--ac:#7ea2f5;--chip:#262b3a}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,'Noto Sans KR',sans-serif}
@@ -20,8 +24,8 @@ def L(s):
     try: return json.loads(s) if s else []
     except Exception: return []
 
-def page(title, body):
-    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon href='{FAVICON}'><style>{CSS}</style><main>{body}</main></html>"
+def page(title, body, icon="▶️"):
+    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon type=image/svg+xml href='{favicon(icon)}'><style>{CSS}</style><main>{body}</main></html>"
 
 def dur(s): return f"{s//3600}:{s%3600//60:02d}:{s%60:02d}" if s and s >= 3600 else (f"{s//60}:{s%60:02d}" if s else "-")
 def num(n): return f"{n:,}" if isinstance(n, int) else "-"
@@ -89,7 +93,7 @@ def build_day(con, day):
         for t, items in subs:
             body += f"<h3 class=sub-h>{e(t)} <span class=meta>({len(items)}) · {e(items[0]['upload_date'] or '-')} ~ {e(items[-1]['upload_date'] or '-')}</span></h3>"
             body += "".join(card(con, v) for v in items)
-    (OUT / f"{day}.html").write_text(page(f"{day} 리포트", body), encoding="utf-8")
+    (OUT / f"{day}.html").write_text(page(f"{day} 리포트", body, "🗓️"), encoding="utf-8")
 
 def build_all(con):
     OUT.mkdir(exist_ok=True)
