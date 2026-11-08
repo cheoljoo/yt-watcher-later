@@ -32,6 +32,8 @@ YouTube 재생목록(예: `my-watch-later`)에 저장해 둔 영상을 매일 �
 | `analyze.py` | `claude -p --json-schema`로 구조화 분석 |
 | `db.py` | SQLite 스키마 (videos, people, links, tags, checks) |
 | `report.py` | 일별 HTML 리포트 (카테고리 → 주제 → 업로드일 순) |
+| `stats.py` | 시청 성향 분석 페이지(`stats.html`): 많이 보는 채널·자주 나오는 인물 (DB만 사용, 리포트 생성 끝에 실행) |
+| `highlight.py` | 인상 깊은 영상 모음(`highlights.html`): `/yt-highlight URL` 스킬이 상세 분석을 만들어 `submit` |
 | `export_json.py` | DB → 사람이 읽기 좋은 JSON |
 | `check.py` | 확인 항목 결과 기록, 시청일 기록 |
 | `run_daily.sh` | cron 진입점 — 항목마다 `claude -p` 를 호출하는 방식 (중복 실행 방지) |

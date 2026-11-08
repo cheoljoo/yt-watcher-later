@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS analysis_runs(      -- 분석 실행 기록: 어떤 �
   category TEXT, subtag TEXT, one_liner TEXT, n_summary INTEGER, n_checks INTEGER, n_links INTEGER, n_people INTEGER,
   analysis_json TEXT, UNIQUE(video_id, engine, model, run_at)
 );
+CREATE TABLE IF NOT EXISTS highlights(          -- 제일 인상 깊은 영상 모음(highlight.py / yt-highlight 스킬): 상세 분석 JSON 보관
+  video_id TEXT PRIMARY KEY, url TEXT, title TEXT, channel TEXT, channel_url TEXT, upload_date TEXT, duration_sec INTEGER, view_count INTEGER,
+  note TEXT, added_at TEXT, engine TEXT, model TEXT, analysis_json TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_runs_video ON analysis_runs(video_id);
 CREATE INDEX IF NOT EXISTS idx_checks_due ON checks(status, check_date);
 CREATE INDEX IF NOT EXISTS idx_videos_date ON videos(processed_date);

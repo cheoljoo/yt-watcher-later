@@ -26,7 +26,7 @@ def L(s):
     except Exception: return []
 
 def page(title, body, icon="▶️"):
-    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon type=image/svg+xml href='{favicon(icon)}'><style>{CSS}</style><main>{body}</main></html>"
+    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon type=image/svg+xml href='{favicon(icon)}'><style>{CSS}</style><main><div class=meta style='text-align:right'>🕒 만든 시각 {D.now().replace('T', ' ')}</div>{body}</main></html>"
 
 def dur(s): return f"{s//3600}:{s%3600//60:02d}:{s%60:02d}" if s and s >= 3600 else (f"{s//60}:{s%60:02d}" if s else "-")
 def num(n): return f"{n:,}" if isinstance(n, int) else "-"
@@ -142,10 +142,12 @@ def build_all(con):
         rows += f"<tr><td><a href='{d}.html'>{d}</a><td>{n}<td>👤 {e(who)}<td>{' '.join(CAT_ICON.get(x, '📌') + e(x) for x in (cats or '').split(','))}</tr>"
     pend = con.execute("SELECT count(*) FROM checks WHERE status='pending'").fetchone()[0]
     due = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<=date('now','localtime') ORDER BY c.check_date").fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += backlog_block(con)
     if due: body += "<section class='card due'><h3>⏰ 지금 확인해야 할 항목</h3>" + checks_table(due, True) + "</section>"
     body += f"<table><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
     import report_extra; report_extra.build(con)
+    import stats; stats.build(con)
+    import highlight; highlight.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)
