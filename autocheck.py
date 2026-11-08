@@ -1,5 +1,5 @@
 """확인 시점이 된 항목을 실제 시세(Yahoo/FRED)로 자동 검증한다.
-근거 시계열이 있는 항목만 판정하고(영상 시점 값 / 확인일 값 / 최신 값을 Claude에 제공), 근거가 없으면 pending 으로 두고 사유만 남긴다."""
+근거 시계열이 있는 항목만 판정하고(등록/영상 시점 값 / 확인일 값 / 최신 값을 Claude에 제공), 근거가 없으면 pending 으로 두고 사유만 남긴다."""
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 from llm import claude_json
@@ -26,18 +26,18 @@ def _at(rows, day):
 
 def _fmt(p): return "자료 없음" if not p else f"{p[1]:,.2f} ({p[0]})"
 
-def run(con, cfg, limit=60):
-    today = D.today()
-    due = con.execute("""SELECT c.*, v.processed_date, v.upload_date FROM checks c JOIN videos v ON v.id=c.video_id
-                         WHERE c.status='pending' AND c.check_date<=? ORDER BY c.check_date LIMIT ?""", (today, limit)).fetchall()
-    if not due: return
-    print(f"[자동 확인] 확인 시점 도래 {len(due)}건", flush=True)
-    # 지표 목록에 없는 확인 대상은 비활성(대시보드 제외) 지표로 만들어 출처를 매핑한다
+def due_checks(con, limit=60):
+    return con.execute("""SELECT c.*, v.processed_date, v.upload_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id
+                          WHERE c.status='pending' AND c.check_date<=? ORDER BY c.check_date LIMIT ?""", (D.today(), limit)).fetchall()
+
+def prepare(con, due):
+    """(코드) 확인 대상이 지표 목록에 없으면 비활성 지표로 등록(출처 매핑 대상이 되게)."""
     for c in due:
         con.execute("INSERT OR IGNORE INTO indicators(name,category,first_seen_at,enriched_at,active) VALUES(?,?,?,?,0)", (c["target"], "확인대상", D.now(), D.now()))
     con.commit()
-    try: indicators.map_sources(con, cfg)
-    except UsageLimit: print("   사용량 한도 — 출처 매핑 생략", flush=True)
+
+def build_items(con, due):
+    """(코드) 시세 근거가 있는 항목 -> [(check_id, 입력줄)]. 근거가 없으면 사유만 남기고 pending 유지."""
     ind_of = {}
     for c in due:
         i = con.execute("SELECT * FROM indicators WHERE name=?", (c["target"],)).fetchone()
@@ -50,10 +50,28 @@ def run(con, cfg, limit=60):
         i = ind_of.get(c["id"]); rows = i and data.get((i["source"], i["symbol"]))
         if not rows:
             con.execute("UPDATE checks SET reason=? WHERE id=?", ("자동 확인 불가: 이 항목에 해당하는 시세 자료가 없어 수동 확인 필요", c["id"])); continue
-        vday = c["processed_date"] or c["upload_date"] or c["check_date"]
-        items.append((c["id"], f"id={c['id']} | 대상 {c['target']} ({i['symbol']}) | 확인할 것: {c['what_to_check']} | 영상의 예상: {c['expectation']} | "
-                               f"영상 시점 값 {_fmt(_at(rows, vday))} | 확인일 값 {_fmt(_at(rows, c['check_date']))} | 최신 값 {_fmt(rows[-1])}"))
+        vday = c["processed_date"] or c["upload_date"] or (c["created_at"] or c["check_date"])[:10]
+        items.append((c["id"], f"id={c['id']} | 대상 {c['target']} ({i['symbol']}) | 확인할 것: {c['what_to_check']} | 영상의 예상: {c['expectation']}{(' | 예상 근거: ' + c['rationale']) if c['rationale'] else ''} | "
+                               f"등록/영상 시점 값 {_fmt(_at(rows, vday))} | 확인일 값 {_fmt(_at(rows, c['check_date']))} | 최신 값 {_fmt(rows[-1])}"))
     con.commit()
+    return items
+
+def apply(con, results):
+    n = 0
+    for r in results:
+        con.execute("UPDATE checks SET status=?, checked_at=?, result=?, opinion=?, reason=? WHERE id=? AND status='pending'",
+                    (r["status"], D.today(), r["result"], r["opinion"], "[자동] " + r["reason"], r["id"])); n += 1
+    con.commit()
+    return n
+
+def run(con, cfg, limit=60):
+    due = due_checks(con, limit)
+    if not due: return
+    print(f"[자동 확인] 확인 시점 도래 {len(due)}건", flush=True)
+    prepare(con, due)
+    try: indicators.map_sources(con, cfg)
+    except UsageLimit: print("   사용량 한도 — 출처 매핑 생략", flush=True)
+    items = build_items(con, due)
     if not items: print("   시세 근거가 있는 항목 없음(수동 확인 필요)", flush=True); return
     def one(chunk):
         try: return claude_json(PROMPT, "\n".join(t for _, t in chunk), SCHEMA, cfg["model"])["items"]
@@ -62,9 +80,6 @@ def run(con, cfg, limit=60):
     n = 0
     try:
         with ThreadPoolExecutor(2) as ex:
-            for res in ex.map(one, [items[k:k + CHUNK] for k in range(0, len(items), CHUNK)]):
-                for r in res:
-                    con.execute("UPDATE checks SET status=?, checked_at=?, result=?, opinion=?, reason=? WHERE id=? AND status='pending'",
-                                (r["status"], today, r["result"], r["opinion"], "[자동] " + r["reason"], r["id"])); n += 1
+            for res in ex.map(one, [items[k:k + CHUNK] for k in range(0, len(items), CHUNK)]): n += apply(con, res)
     except UsageLimit: print("   사용량 한도 — 나머지는 다음 실행으로", flush=True)
-    con.commit(); print(f"   자동 판정 {n}건 (근거 있는 {len(items)}건 중)", flush=True)
+    print(f"   자동 판정 {n}건 (근거 있는 {len(items)}건 중)", flush=True)

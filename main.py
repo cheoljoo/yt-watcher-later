@@ -19,9 +19,9 @@ def vocab(con):
 COLS = ["url","title","owner","playlist_name","channel","channel_id","channel_url","uploader_id","upload_date","duration_sec",
         "view_count","like_count","comment_count","yt_categories","yt_tags","description","thumbnail","live_status",
         "processed_at","processed_date","status","error","transcript_lang","model","category","subtag","extra_tags","one_liner",
-        "summary","keywords","comments_insight","macro_phase","macro_phase_reason","indicators_to_watch","analysis_json"]
+        "summary","keywords","comments_insight","macro_phase","macro_phase_reason","indicators_to_watch","analysis_json","engine","run_id","lessons","business"]
 
-def store(con, v, col, res, model):
+def store(con, v, col, res, model, engine="claude"):
     """분석 결과를 DB에 저장(메인 스레드 전용). watched_at / first_seen_at / wl_position 은 보존."""
     m, vid = col["meta"], v["id"]
     summary = "\n".join(f"- {p}" for p in res["summary_points"])
@@ -30,9 +30,11 @@ def store(con, v, col, res, model):
                processed_at=D.now(), processed_date=D.today(), status="done", error=None, transcript_lang=col["lang"], model=model,
                category=res["category"], subtag=res["subtag"], extra_tags=json.dumps(res["extra_tags"], ensure_ascii=False),
                one_liner=res["one_liner"], summary=summary, keywords=json.dumps(res["keywords"], ensure_ascii=False),
-               comments_insight=res["comments_insight"], macro_phase=mac.get("phase"), macro_phase_reason=mac.get("phase_reason"),
+               comments_insight=res["comments_insight"], lessons=json.dumps(res.get("lessons", []), ensure_ascii=False),
+               business=json.dumps(res.get("business"), ensure_ascii=False) if res.get("business") else None, macro_phase=mac.get("phase"), macro_phase_reason=mac.get("phase_reason"),
                indicators_to_watch=json.dumps(mac.get("indicators_to_watch", []), ensure_ascii=False),
-               analysis_json=json.dumps(res, ensure_ascii=False))
+               analysis_json=json.dumps(res, ensure_ascii=False), engine=engine, run_id=D.run_id(engine))
+    D.add_run(con, vid, engine, model, res)
     con.execute(f"""INSERT INTO videos(id,wl_position,first_seen_at,{",".join(COLS)}) VALUES(?,?,?,{",".join("?" * len(COLS))})
         ON CONFLICT(id) DO UPDATE SET {",".join(f"{c}=excluded.{c}" for c in COLS)}""",
         (vid, v["pos"], D.now(), *[row[c] for c in COLS]))

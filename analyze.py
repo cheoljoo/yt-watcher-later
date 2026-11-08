@@ -6,7 +6,7 @@ CATEGORIES = ["경제", "AI", "IT", "정치·사회", "과학·건강", "기타"
 SCHEMA = {
   "type": "object",
   "required": ["category", "subtag", "extra_tags", "one_liner", "summary_points", "keywords",
-               "people", "links", "comments_insight", "macro", "checks"],
+               "people", "links", "comments_insight", "lessons", "business", "macro", "checks"],
   "properties": {
     "category": {"type": "string", "enum": CATEGORIES},
     "subtag": {"type": "string"},
@@ -21,6 +21,10 @@ SCHEMA = {
                              "kind": {"type": "string", "enum": ["git", "source", "paper", "site", "other"]},
                              "context": {"type": "string"}}}},
     "comments_insight": {"type": "string"},
+    "lessons": {"type": "array", "items": {"type": "string"}},
+    "business": {"type": "object", "required": ["possible", "idea", "how"],
+                 "properties": {"possible": {"type": "string", "enum": ["가능", "조건부", "어려움"]},
+                                "idea": {"type": "string"}, "how": {"type": "string"}}},
     "macro": {"type": ["object", "null"], "required": ["phase", "phase_reason", "indicators_to_watch"],
               "properties": {"phase": {"type": "string"}, "phase_reason": {"type": "string"},
                              "indicators_to_watch": {"type": "array", "items": {"type": "object",
@@ -47,6 +51,10 @@ PROMPT = """당신은 YouTube 영상 분석가입니다. 아래 입력(제목/�
 - summary_points: 핵심 5~8개. people: 영상에 등장/인용된 실명 인물과 직함·소속(진행자·출연자 포함).
 - links: 설명·자막·댓글에 언급된 git 저장소/소스/논문/도구 URL (IT·AI 위주, 없으면 빈 배열). 자막에서 이름만 언급되고 URL이 불명확하면 만들어내지 말고 제외.
 - comments_insight: 댓글 중 의미 있는 정보·반론·보완만 요약(광고·잡담 제외). 없으면 "없음".
+- lessons: 이 동영상에서 시청자가 배울 점 2~5개. 요약의 반복이 아니라 "그래서 내가 무엇을 알게/해보게 되는가"를 구체적으로(개념·방법·주의점·적용해 볼 일).
+- business: 이 영상의 내용으로 돈 버는 사업(제품·서비스·콘텐츠·투자 전략 등)을 만들 수 있는가.
+  possible = 가능 | 조건부 | 어려움. idea = 어떤 사업인지 한두 문장(대상 고객과 수익 방식 포함), how = 시작하는 구체적 방법·단계·필요한 것·위험.
+  어려우면 possible=어려움, idea="해당 없음", how 에 이유를 짧게. 영상 내용에 근거해 현실적으로, 수익을 보장하는 것처럼 쓰지 마세요.
 - macro: category가 경제일 때만 채움(아니면 null).
   phase = 영상이 보는 현재 매크로 국면(예: 금리인하 사이클 초입, 경기 둔화, 유동성 확장 등)과 phase_reason(근거),
   indicators_to_watch = 이 영상 맥락에서 봐야 할 경제지표(이름, 왜 봐야 하는지).
@@ -60,13 +68,21 @@ class UsageLimit(RuntimeError): pass
 
 def _limit(msg): m = msg.lower(); return "429" in m or "usage limit" in m or "rate limit" in m
 
-def analyze(video, collected, vocab, today, model="sonnet"):
+def build_request(video, collected, vocab, today, max_chars=None):
+    """-> (prompt, body). max_chars 가 있으면 자막이 그보다 길 때 앞·뒤만 남긴다(스킬 모드: 컨텍스트 보호)."""
     info, cm = collected["info"], collected["info"].get("comments") or []
     comments = "\n".join(f"- ({c.get('like_count',0)}👍) {c.get('text','')[:300]}" for c in cm[:40]) or "(없음)"
+    tr = collected["transcript"]
+    if tr and max_chars and len(tr) > max_chars:
+        h = max_chars * 2 // 3; tr = tr[:h] + f"\n…(중간 {len(tr) - max_chars:,}자 생략)…\n" + tr[-(max_chars - h):]
     body = (f"[제목] {video['title']}\n[채널] {collected['meta']['channel']}\n[업로드] {collected['meta']['upload_date']}\n"
             f"[설명]\n{(info.get('description') or '')[:2500]}\n\n[댓글]\n{comments}\n\n"
-            f"[자막]\n{collected['transcript'] or '(자막 없음 — 제목/설명/댓글만으로 분석, 불확실하면 명시)'}")
+            f"[자막]\n{tr or '(자막 없음 — 제목/설명/댓글만으로 분석, 불확실하면 명시)'}")
     prompt = PROMPT.format(today=today, cats=", ".join(CATEGORIES), vocab=", ".join(vocab) or "(없음)")
+    return prompt, body
+
+def analyze(video, collected, vocab, today, model="sonnet"):
+    prompt, body = build_request(video, collected, vocab, today)
     r = subprocess.run(["claude", "-p", prompt, "--model", model, "--tools", "", "--no-session-persistence",
                         "--output-format", "json", "--json-schema", json.dumps(SCHEMA)],
                        input=body, capture_output=True, text=True, timeout=900)
