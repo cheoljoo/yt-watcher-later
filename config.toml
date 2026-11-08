@@ -9,6 +9,7 @@ model = "sonnet"
 
 # 병렬 처리. 수집(yt-dlp)은 429가 나면 자동으로 병렬 수를 줄이고, 잠잠하면 다시 늘린다.
 parallel_collect = 3          # 수집 시작 병렬 수 (상한)
+max_analyze = 30              # 스킬(yt-daily) 한 번 실행(run_skill.sh 1회)에서 Claude로 분석할 영상 수 상한. 수집은 전부 하고 나머지는 다음 날로 이월
 parallel_analyze = 2          # Claude 분석 병렬 수
 cooldown_sec = 60             # 429 발생 후 쉬는 시간
 

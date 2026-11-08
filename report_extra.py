@@ -43,10 +43,11 @@ def macro_block(con, day=None):
         svg += f"<text x={x:.0f} y={ty:.0f} text-anchor=middle font-size=12 font-weight=700 fill=currentColor>현재: {e(CYCLE[ci][0])} {'↗ 상승 국면' if up else '↘ 하강 국면'}</text>"
     svg += "</svg>"
     det = "".join(f"<details><summary><b>{i + 1}. {e(n_)}</b>{' ← 현재' if i == ci else ''}</summary><p>{e(d)}</p></details>" for i, (n_, d) in enumerate(CYCLE))
-    why = (f"<details open><summary><b>위치 판단 근거</b> <span class=meta>({e(cur['date'])})</span></summary><p>{e(cur['reason'])}</p></details>") if cur else "<p class=meta>아직 위치 판단 기록이 없습니다.</p>"
+    why = (f"<details open><summary><b>위치 판단 근거</b> <span class=meta>({e(cur['date'])} · 🤖 {e(cur['llm'] or '-')})</span></summary><p>{e(cur['reason'])}</p></details>") if cur else "<p class=meta>아직 위치 판단 기록이 없습니다.</p>"
     return f"<section class=card><h3>🧭 매크로 주기와 현재 위치</h3><p class=meta>곡선은 경기 순환을 단순화한 모형입니다. ●는 오늘 판단한 위치, ○는 최근 판단(마우스를 올리면 날짜).</p>{svg}{why}{det}</section>"
 
 def _vlink(c):
+    if not c["video_id"]: return "✍️ 직접 등록"
     d = c["processed_date"]
     return f"<a href='{d}.html#v-{e(c['video_id'])}'>{e((c['title'] or '')[:46])}</a>" if d else e((c["title"] or "")[:46])
 
@@ -66,10 +67,10 @@ def _rows(rows, done=None):
         if c["checked_at"]:
             res = f"<b>{e(c['checked_at'][:10])}</b><br>{e(c['result'] or '')}<br><i>{e(c['opinion'] or '')}</i> <span class=meta>{e(c['reason'] or '')}</span>"
         else: res = "<span class=meta>아직 확인 전</span>" + (f"<br><span class=meta>{e(c['reason'])}</span>" if c["reason"] else "")
-        h += f"<tr><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span><td>{_vlink(c)}<td>{res}</tr>"
+        h += f"<tr><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>근거: ' + e(c['rationale']) + '</span>') if c['rationale'] else ''}<td>{_vlink(c)}<td>{res}</tr>"
     return h + "</table>"
 
-SEL = "SELECT c.*, v.title, v.processed_date FROM checks c JOIN videos v ON v.id=c.video_id"
+SEL = "SELECT c.*, v.title, COALESCE(v.run_id, v.processed_date) AS processed_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id"
 
 def build_checks(con):
     today = D.today()
@@ -103,9 +104,9 @@ def _ind_card(i, v, srcs):
     chg = f" ({v['change_pct']:+.2f}%)" if v["change_pct"] is not None else ""
     h = f"<tr><td><b>{e(i['name'])}</b><br><span class=meta>{e(i['category'] or '')}{' · ⭐' if i['importance'] == 'high' else ''}</span>"
     h += f"<td>{arrow} {e(v['value_text'] or _fmt(v['value']))}{e(chg)}<br><span class=meta>{'🕰️ 오래된 값 · ' if _stale(v['value_date']) else ''}기준일 {e(v['value_date'] or '-')}; 직전 {_fmt(v['prev_value'])}</span>"
-    h += f"<td>{sig or '<span class=meta>변화 없음</span>'}<br>{e(v['meaning'] or '')}"
-    h += f"<td><details><summary>설명·해석·기준값</summary><p>{e(i['description'] or '')}</p><p><b>해석</b> {e(i['interpretation'] or '')}</p><p><b>기준(평균/균형)</b> {e(i['baseline'] or '')}</p>"
-    h += "<p class=meta>출처 영상: " + ", ".join(f"<a href='{e(s['processed_date'])}.html#v-{e(s['video_id'])}'>{e((s['title'] or '')[:24])}</a>" for s in srcs[:5]) + "</p></details></tr>"
+    h += f"<td>{sig or '<span class=meta>변화 없음</span>'}<br>{e(v['meaning'] or '')}{(" <span class=meta>🤖 " + e(v['llm']) + "</span>") if v['llm'] and v['meaning'] else ''}"
+    h += f"<td><details><summary>설명·해석·기준값 <span class=meta>🤖 {e(i['enrich_llm'] or '-')}</span></summary><p>{e(i['description'] or '')}</p><p><b>해석</b> {e(i['interpretation'] or '')}</p><p><b>기준(평균/균형)</b> {e(i['baseline'] or '')}</p>"
+    h += f"<p class=meta>시세 출처 매핑: 🤖 {e(i['map_llm'] or '-')}</p><p class=meta>출처 영상: " + ", ".join(f"<a href='{e(s['processed_date'])}.html#v-{e(s['video_id'])}'>{e((s['title'] or '')[:24])}</a>" for s in srcs[:5]) + "</p></details></tr>"
     return h
 
 def build_indicators(con):
@@ -114,9 +115,9 @@ def build_indicators(con):
     if not last:
         body += "<p class=meta>아직 수집된 지표 값이 없습니다(일일 실행에서 수집).</p>"
         (OUT / "indicators.html").write_text(page("지표", body, "📊"), encoding="utf-8"); return
-    rows = con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning
+    rows = con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning, v.llm
                           FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE v.date=? ORDER BY i.importance DESC, i.category, i.name""", (last,)).fetchall()
-    srcs = lambda iid: con.execute("SELECT s.video_id, vd.title, vd.processed_date FROM indicator_sources s JOIN videos vd ON vd.id=s.video_id WHERE s.indicator_id=?", (iid,)).fetchall()
+    srcs = lambda iid: con.execute("SELECT s.video_id, vd.title, COALESCE(vd.run_id, vd.processed_date) AS processed_date FROM indicator_sources s JOIN videos vd ON vd.id=s.video_id WHERE s.indicator_id=?", (iid,)).fetchall()
     head = "<table><tr><th>지표<th>값 / 전일 대비 · 1주 추세<th>신호 · 의미<th>설명</tr>"
     changed = sorted([r for r in rows if r["signal"]], key=lambda r: ["warning", "threshold", "direction"].index(r["signal"]))
     body += f"<section class='card due'><h3>🚨 {e(last)} 변화·경고 ({len(changed)})</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만</p>"
