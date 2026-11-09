@@ -51,10 +51,13 @@ def schema_path():
     W.mkdir(parents=True, exist_ok=True); p = W / "schema.json"
     p.write_text(json.dumps(SCHEMA, ensure_ascii=False, indent=1), encoding="utf-8"); return p
 
-def prepare(url, note):
+def prepare(url, note, force=False):
     import main as M
     from collect import collect
     vid = vid_of(url); W.mkdir(parents=True, exist_ok=True)
+    con = D.connect()
+    if con.execute("SELECT 1 FROM highlights WHERE video_id=?", (vid,)).fetchone() and not force:
+        print(json.dumps({"id": vid, "skip": True, "reason": "이미 인상 깊은 영상 모음에 있음 — 다시 분석하지 않음", "where": f"highlights.html#h-{vid}"}, ensure_ascii=False)); return
     col = collect(vid, M.cfg)
     info, cm = col["info"], col["info"].get("comments") or []
     comments = "\n".join(f"- ({c.get('like_count', 0)}👍) {c.get('text', '')[:400]}" for c in cm[:40]) or "(없음)"
@@ -89,7 +92,7 @@ def submit(vid, file):
 
 def ul(items): return "<ul>" + "".join(f"<li>{e(x)}</li>" for x in items) + "</ul>" if items else "<p class=meta>없음</p>"
 
-def card(r, n=None):
+def card(r, n=None, earlier=None):
     a = json.loads(r["analysis_json"]); b = a.get("business") or {}
     h = f"<section class=card id='h-{e(r['video_id'])}'><h3>{('#' + str(n) + ' ') if n else ''}⭐ <a href='{e(r['url'])}'>{e(r['title'])}</a></h3>"
     h += (f"<div class=meta>📺 <a href='{e(r['channel_url'] or '#')}'>{e(r['channel'] or '')}</a> · 업로드 {e(r['upload_date'] or '-')} · "
@@ -97,6 +100,7 @@ def card(r, n=None):
           if r["view_count"] is not None else "")
     h += f"<p><b>{e(a.get('one_liner', ''))}</b></p>"
     h += f"<h2>💡 왜 인상 깊은가</h2><p>{e(a.get('why_impressive', ''))}</p>"
+    if earlier: h += f"<p class=meta>♻️ 이미 일일 리포트에서 분석했던 영상입니다(처리일 {e(earlier[1])}) — <a href='{e(earlier[0])}.html#v-{e(r['video_id'])}'>그때의 요약 보기</a></p>"
     if r["note"]: h += f"<p class=meta>📝 내 메모: {e(r['note'])}</p>"
     h += f"<h2>📌 한눈에 보기</h2><p>{e(a.get('tldr', ''))}</p>"
     h += "<h2>🧭 영상 흐름</h2>" + "".join(f"<details><summary><b>{e(o['topic'])}</b> <span class=meta>{e(o['when'])}</span></summary><p>{e(o['detail'])}</p></details>" for o in a.get("outline", []))
@@ -112,6 +116,10 @@ def card(r, n=None):
     h += "<h2>✅ 바로 해볼 일</h2>" + ul(a.get("action_items")) + "<h2>⚠️ 주의할 점</h2>" + ul(a.get("caveats")) + "<h2>❓ 더 알아볼 것</h2>" + ul(a.get("further_questions"))
     if a.get("links"): h += "<h2>🔗 링크</h2><ul>" + "".join(f"<li><a href='{e(x['url'])}'>{e(x['url'])}</a> <span class=meta>{e(x['context'])}</span></li>" for x in a["links"]) + "</ul>"
     return h + "</section>"
+
+def _earlier(con, vid):
+    x = con.execute("SELECT COALESCE(run_id,processed_date) k, processed_date d FROM videos WHERE id=? AND status='done'", (vid,)).fetchone()
+    return (x["k"], x["d"]) if x and x["k"] else None
 
 LAYOUT_CSS = """
 main{max-width:none!important}
@@ -140,17 +148,17 @@ def build(con=None):
     nav = "".join(f"<a href='#h-{e(r['video_id'])}'>{e(r['title'])}<small>{e(r['channel'] or '')} · 담은 날 {e((r['added_at'] or '')[:10])}</small></a>" for r in rows)
     body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>직접 고른 영상을 아주 상세히 정리한 모음 · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>목록</a> · "
             f"추가: Claude/agy 에서 <code>/yt-highlight URL</code></p>")
-    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r, i) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
+    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r, i, _earlier(con, r['video_id'])) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
     else: body += "<p class=meta>아직 없습니다.</p>"
     (R.OUT / "highlights.html").write_text(R.page("인상 깊은 영상", body, "⭐"), encoding="utf-8")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
-    p = sp.add_parser("prepare"); p.add_argument("url"); p.add_argument("--note", default="")
+    p = sp.add_parser("prepare"); p.add_argument("url"); p.add_argument("--note", default=""); p.add_argument("--force", action="store_true")
     p = sp.add_parser("submit"); p.add_argument("id"); p.add_argument("--file")
     sp.add_parser("build"); sp.add_parser("list")
     a = ap.parse_args()
-    if a.cmd == "prepare": prepare(a.url, a.note)
+    if a.cmd == "prepare": prepare(a.url, a.note, a.force)
     elif a.cmd == "submit": submit(a.id, a.file)
     elif a.cmd == "build": build()
     else:

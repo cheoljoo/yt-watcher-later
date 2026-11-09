@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS indicator_values(
   meaning TEXT, PRIMARY KEY(indicator_id, date)
 );
 CREATE TABLE IF NOT EXISTS macro_daily(date TEXT PRIMARY KEY, phase_index INTEGER, phase TEXT, reason TEXT);
+CREATE TABLE IF NOT EXISTS dup_seen(video_id TEXT, owner TEXT, playlist_name TEXT, seen_at TEXT, PRIMARY KEY(video_id, owner, playlist_name));  -- 이미 분석된 영상이 다른 재생목록에도 저장돼 있음을 기록(분석은 건너뜀)
 CREATE TABLE IF NOT EXISTS backlog(video_id TEXT PRIMARY KEY, title TEXT, owner TEXT, playlist_name TEXT, pos INTEGER, seen_at TEXT);  -- 재생목록에 있으나 아직 분석 안 된 영상(collect 때 갱신)
 CREATE TABLE IF NOT EXISTS analysis_runs(      -- 분석 실행 기록: 어떤 도구(engine)·모델이 이 영상을 어떻게 분석했는가 (여러 도구의 결과를 나란히 보관)
   id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT, engine TEXT, model TEXT, run_at TEXT, source TEXT,
@@ -92,6 +93,10 @@ def connect():
     icols = {r[1] for r in db.execute("PRAGMA table_info(indicators)")}
     for name in ("source", "symbol", "mapped_at", "alias_of", "enrich_llm", "map_llm"):
         if name not in icols: db.execute(f"ALTER TABLE indicators ADD COLUMN {name} TEXT")
+    # 중복 정리: 영상은 id(URL 의 v=) 가 키라 중복 불가. 하위 표의 중복 행 제거 + 유일 인덱스, 이미 분석된 영상의 backlog 제거
+    db.execute("DELETE FROM indicator_sources WHERE rowid NOT IN (SELECT min(rowid) FROM indicator_sources GROUP BY indicator_id, video_id)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_indicator_sources ON indicator_sources(indicator_id, video_id)")
+    db.execute("DELETE FROM backlog WHERE video_id IN (SELECT id FROM videos WHERE status='done')")
     db.execute("UPDATE videos SET engine='claude' WHERE engine IS NULL AND status='done'")
     if "enrich_llm" in {r[1] for r in db.execute("PRAGMA table_info(indicators)")}:    # 기존 값 채우기: 이전 값은 모두 claude · sonnet (2026-11-08 17시 이후 agy 처리분 제외)
         db.execute("UPDATE indicators SET enrich_llm=CASE WHEN enriched_at>='2026-11-08T17:00' THEN 'agy · Gemini 3.8 Flash (Medium)' ELSE 'claude · sonnet' END WHERE enriched_at IS NOT NULL AND enrich_llm IS NULL")

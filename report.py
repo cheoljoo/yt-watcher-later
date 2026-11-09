@@ -67,6 +67,8 @@ def card(con, v):
     h += f"<div class=meta>👤 {e(v['owner'] or '-')} 님이 저장 · 📺 <a href='{e(v['channel_url'] or '#')}'>{e(v['channel'] or '')}</a> · 업로드 {e(v['upload_date'] or '-')} · {dur(v['duration_sec'])} · 조회 {num(v['view_count'])} · 👍 {num(v['like_count'])} · 댓글 {num(v['comment_count'])}"
     h += f" · 본 날짜 {e(v['watched_at'] or '미기록')}"
     h += f" · 🤖 {e(v['engine'] or 'claude')} · {e(v['model'] or '-')}</div>"
+    for d in con.execute("SELECT owner,playlist_name,seen_at FROM dup_seen WHERE video_id=?", (vid,)):
+        h += f"<div class=meta>♻️ {e(d['owner'])} 님의 {e(d['playlist_name'] or '')} 에도 저장됨 (발견 {e((d['seen_at'] or '')[:10])}) — 이미 분석해서 다시 하지 않았습니다</div>"
     ts = v["transcript_status"]
     if ts == "pending_retry": h += f"<div class=meta>⚠ 스크립트 없음(생방송) — {e(v['transcript_retry_at'])} 재시도 예정. 현재 분석은 제목·설명·댓글 기반</div>"
     elif ts == "gave_up": h += "<div class=meta>⚠ 스크립트 확보 실패(재시도 후 포기). 분석은 제목·설명·댓글 기반</div>"

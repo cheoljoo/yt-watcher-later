@@ -10,7 +10,7 @@ user-invocable: true
 ## 절차
 
 1. 인자에서 URL(또는 11자리 영상 ID)과, 남은 글이 있으면 그것을 사용자 메모로 삼는다. URL 이 없으면 한 번만 물어본다.
-2. `uv run highlight.py prepare "URL" --note "메모"` 를 실행한다 (메모가 없으면 `--note` 생략). 출력 JSON 의 `id`, `input_file`, `schema_file`, `out_file` 을 쓴다.
+2. `uv run highlight.py prepare "URL" --note "메모"` 를 실행한다 (메모가 없으면 `--note` 생략). 출력 JSON 에 `"skip": true` 가 있으면 이미 모음에 있는 영상이므로 **분석하지 않고** 사용자에게 `where` 위치만 알리고 끝낸다(다시 하려면 `--force`). 아니면 `id`, `input_file`, `schema_file`, `out_file` 을 쓴다.
 3. `input_file` 을 Read 로 끝까지 읽는다 (`allow_large: true`; 길면 offset/limit 으로 나눠 **전부** 읽는다). 파일 앞부분의 `# 지시` 를 따른다.
 4. `schema_file`(JSON Schema)에 맞춰 분석 JSON 을 만들어 Write 로 `out_file` 에 저장한다.
    - 매우 상세하게: outline(구간별 6~15개), key_points(8~15개, 각 3~5문장), evidence(주장·근거·한계), numbers, concepts, lessons(5개 이상), business(가능/조건부/어려움 + 아이디어 + 단계별 방법 + 위험), action_items, caveats, further_questions.
