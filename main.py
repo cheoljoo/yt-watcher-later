@@ -111,13 +111,18 @@ def retry_pending(con):
 
 def load_playlists():
     """config 의 모든 재생목록을 읽어 영상 목록(중복 제거: 먼저 나온 소유자 우선) 반환."""
-    seen, out = set(), []
+    seen, out, dups = set(), [], []
     for pl in cfg["playlists"]:
         vids = fetch_playlist(pl["url"], cfg.get("cookies", ""))
         print(f"재생목록 {pl['owner']}/{pl['name']}: {len(vids)}개", flush=True)
         for i, v in enumerate(vids):
-            if v["id"] in seen: continue
+            if v["id"] in seen:                      # 같은 영상(URL 키)이 다른 재생목록에도 있음 -> 분석은 한 번만, 기록만 남김
+                dups.append((v["id"], pl["owner"], pl["name"])); continue
             seen.add(v["id"]); out.append(dict(v, pos=i, owner=pl["owner"], playlist=pl["name"]))
+    if dups:
+        con = D.connect()
+        con.executemany("INSERT OR IGNORE INTO dup_seen VALUES(?,?,?,?)", [(a, b, c, D.now()) for a, b, c in dups]); con.commit(); con.close()
+        print(f"   다른 재생목록과 중복된 영상 {len(dups)}개 (분석 건너뜀, dup_seen 에 기록)", flush=True)
     return out
 
 def main():
