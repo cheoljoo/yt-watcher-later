@@ -69,7 +69,7 @@ uv run check.py watched VIDEO_ID [YYYY-MM-DD]
 
 스킬 모드(권장 실험): 스킬 안에서는 `claude -p` 를 다시 호출하지 않는다. cron 이 `claude -p /yt-daily` 를 **한 번**
 실행하면, 그 세션이 `work.py next`로 DB의 대기 작업(영상 분석·지표 설명·출처 매핑·의미 해설·매크로 위치·확인 판정)을
-차례로 받아 `submit` 한다. 수집은 새 영상을 전부 하지만, **Claude 영상 분석은 한 번 실행에 최대 `max_analyze`(config.toml, 기본 30)개**이고 나머지는 다음 날로 넘어간다(재생목록 앞쪽부터). 아직 분석되지 않은 영상 수는 `reports/index.html`(과 오늘 리포트)에 표시된다. 입력이 세션 한도(`BUDGET`, 기본 70만자)를 넘으면 다음 라운드(`ROUNDS`, 기본 2)에서 이어간다.
+차례로 받아 `submit` 한다. 수집은 새 영상을 전부 하지만, **Claude 영상 분석은 한 번 실행에 최대 `max_analyze`(config.toml, 기본 30)개**이고 나머지는 다음 날로 넘어간다(재생목록 앞쪽부터). 아직 분석되지 않은 영상 수는 `reports/index.html`(과 오늘 리포트)에 표시된다. 입력이 세션 한도(`BUDGET`, 기본 70만자)를 넘으면 다음 라운드(`ROUNDS`, 기본 4)에서 이어간다.
 
 매일 자동 실행 예 (crontab):
 

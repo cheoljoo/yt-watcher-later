@@ -61,7 +61,7 @@ def _light(c):
 
 def _rows(rows, done=None):
     """확인 항목 표 — 대기/완료 모두 같은 열: 신호등, 확인일, 대상, 예상, 출처 영상, 확인한 날·결과·의견."""
-    h = "<table><tr><th>신호<th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>🎬 출처 영상<th>✅ 확인한 날 · 결과 · 의견</tr>"
+    h = "<table class=num><tr><th>신호<th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>🎬 출처 영상<th>✅ 확인한 날 · 결과 · 의견</tr>"
     for c in rows:
         ic, tx = _light(c)
         if c["checked_at"]:
@@ -111,14 +111,14 @@ def _ind_card(i, v, srcs):
 
 def build_indicators(con):
     last = con.execute("SELECT max(date) FROM indicator_values").fetchone()[0]
-    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>목록</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a></p>" + IND_LEGEND + macro_block(con)
+    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>목록</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a></p>" + IND_LEGEND + macro_block(con)
     if not last:
         body += "<p class=meta>아직 수집된 지표 값이 없습니다(일일 실행에서 수집).</p>"
         (OUT / "indicators.html").write_text(page("지표", body, "📊"), encoding="utf-8"); return
     rows = con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning, v.llm
                           FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE v.date=? ORDER BY i.importance DESC, i.category, i.name""", (last,)).fetchall()
     srcs = lambda iid: con.execute("SELECT s.video_id, vd.title, COALESCE(vd.run_id, vd.processed_date) AS processed_date FROM indicator_sources s JOIN videos vd ON vd.id=s.video_id WHERE s.indicator_id=?", (iid,)).fetchall()
-    head = "<table><tr><th>지표<th>값 / 전일 대비 · 1주 추세<th>신호 · 의미<th>설명</tr>"
+    head = "<table class=num><tr><th>지표<th>값 / 전일 대비 · 1주 추세<th>신호 · 의미<th>설명</tr>"
     changed = sorted([r for r in rows if r["signal"]], key=lambda r: ["warning", "threshold", "direction"].index(r["signal"]))
     body += f"<section class='card due'><h3>🚨 {e(last)} 변화·경고 ({len(changed)})</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만</p>"
     body += (head + "".join(_ind_card(r, r, srcs(r["id"])) for r in changed) + "</table>") if changed else "<p class=meta>오늘은 해당 항목이 없습니다.</p>"

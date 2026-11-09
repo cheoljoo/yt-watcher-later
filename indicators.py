@@ -151,7 +151,7 @@ def gather_values(con, force=False):
     for ind, rows in zip(inds, series):
         if not rows: continue                                  # 못 구한 지표는 그날 건너뜀(값을 만들지 않음)
         a = analyze_series(ind, rows)
-        con.execute("INSERT OR REPLACE INTO indicator_values VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        con.execute("INSERT OR REPLACE INTO indicator_values(indicator_id,date,value,value_text,value_date,prev_value,change_pct,direction,signal,signal_reason,meaning) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (ind["id"], today, a["value"], _fmt(a["value"]) + (" (전년 대비 %)" if ind["source"] == "fred" and ind["symbol"] in marketdata.YOY else (f" {ind['unit']}" if ind["unit"] else "")),
                      a["value_date"], a["prev"], a["chg"], a["direction"], a["signal"], a["why"], None)); n += 1
     con.commit()

@@ -89,9 +89,9 @@ def submit(vid, file):
 
 def ul(items): return "<ul>" + "".join(f"<li>{e(x)}</li>" for x in items) + "</ul>" if items else "<p class=meta>없음</p>"
 
-def card(r):
+def card(r, n=None):
     a = json.loads(r["analysis_json"]); b = a.get("business") or {}
-    h = f"<section class=card id='h-{e(r['video_id'])}'><h3>⭐ <a href='{e(r['url'])}'>{e(r['title'])}</a></h3>"
+    h = f"<section class=card id='h-{e(r['video_id'])}'><h3>{('#' + str(n) + ' ') if n else ''}⭐ <a href='{e(r['url'])}'>{e(r['title'])}</a></h3>"
     h += (f"<div class=meta>📺 <a href='{e(r['channel_url'] or '#')}'>{e(r['channel'] or '')}</a> · 업로드 {e(r['upload_date'] or '-')} · "
           f"{(r['duration_sec'] or 0) // 60}분 · 조회 {r['view_count']:,} · 담은 시각 {e((r['added_at'] or '').replace('T', ' '))} · 🤖 {e(r['engine'])} · {e(r['model'])}</div>"
           if r["view_count"] is not None else "")
@@ -120,7 +120,7 @@ main{max-width:none!important}
 .hl-nav a{display:block;padding:8px 10px;margin:2px 0;border-radius:8px;text-decoration:none;color:inherit;line-height:1.35}
 .hl-nav a:hover{background:rgba(128,128,128,.15)}
 .hl-nav a.on{background:rgba(76,139,245,.2);font-weight:600;box-shadow:inset 3px 0 0 #4c8bf5}
-.hl-nav small{display:block;opacity:.65;font-weight:400}
+.hl-nav{counter-reset:hn}.hl-nav a::before{counter-increment:hn;content:counter(hn) ". ";font-weight:700;color:#4c8bf5}.hl-nav small{display:block;opacity:.65;font-weight:400}
 .hl-body{flex:1;min-width:0}
 .js .hl-body section.card{display:none}.js .hl-body section.card.on{display:block}
 @media(max-width:760px){.hl{display:block}.hl-nav{position:static;max-height:none;border-right:0;border-bottom:1px solid rgba(128,128,128,.35);padding:0 0 8px;margin-bottom:12px}}
@@ -140,7 +140,7 @@ def build(con=None):
     nav = "".join(f"<a href='#h-{e(r['video_id'])}'>{e(r['title'])}<small>{e(r['channel'] or '')} · 담은 날 {e((r['added_at'] or '')[:10])}</small></a>" for r in rows)
     body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>직접 고른 영상을 아주 상세히 정리한 모음 · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>목록</a> · "
             f"추가: Claude/agy 에서 <code>/yt-highlight URL</code></p>")
-    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r) for r in rows)}</div></div>{LAYOUT_JS}"
+    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r, i) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
     else: body += "<p class=meta>아직 없습니다.</p>"
     (R.OUT / "highlights.html").write_text(R.page("인상 깊은 영상", body, "⭐"), encoding="utf-8")
 

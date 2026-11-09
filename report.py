@@ -19,7 +19,7 @@ main{max-width:860px;margin:0 auto;padding:24px 16px 64px}h1{font-size:22px}h2{f
 a{color:var(--ac)}.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px 18px;margin:16px 0}
 .card h3{margin:0 0 4px;font-size:17px}.meta{color:var(--mu);font-size:13px}.chip{display:inline-block;background:var(--chip);border-radius:99px;padding:1px 10px;margin:2px 4px 2px 0;font-size:12.5px}
 .chip.cat{font-weight:600}table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border-top:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}
-ul{margin:4px 0;padding-left:20px}.cat-h{font-size:19px;margin:34px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--ac);color:var(--fg)}.sub-h{font-size:15px;margin:20px 0 -4px;color:var(--ac)}.due{border-left:4px solid #d9822b}.st-pending{color:#b86e00}.st-confirmed{color:#1a8a4a}.st-refuted{color:#c0392b}"""
+main{counter-reset:vc}section.vc>h3::before{counter-increment:vc;content:"#" counter(vc) "  ";color:var(--ac);font-weight:700}table.num{counter-reset:n}table.num tr+tr>td:first-child::before{counter-increment:n;content:counter(n) ". ";font-weight:700;color:var(--ac)}ul{margin:4px 0;padding-left:20px}.cat-h{font-size:19px;margin:34px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--ac);color:var(--fg)}.sub-h{font-size:15px;margin:20px 0 -4px;color:var(--ac)}.due{border-left:4px solid #d9822b}.st-pending{color:#b86e00}.st-confirmed{color:#1a8a4a}.st-refuted{color:#c0392b}"""
 
 def L(s):
     try: return json.loads(s) if s else []
@@ -33,7 +33,7 @@ def num(n): return f"{n:,}" if isinstance(n, int) else "-"
 
 def checks_table(rows, with_video=False):
     if not rows: return ""
-    h = "<table><tr><th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>상태·결과</tr>"
+    h = "<table class=num><tr><th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>상태·결과</tr>"
     for c in rows:
         res = f"<span class=st-{c['status']}>{ST_ICON.get(c['status'], '')} {e(c['status'])}</span>"
         if c["checked_at"]: res += f" ({e(c['checked_at'])})<br>{e(c['result'] or '')}<br><i>{e(c['opinion'] or '')}</i> {e(c['reason'] or '')}"
@@ -63,7 +63,7 @@ def card(con, v):
     ppl = con.execute("SELECT name,role FROM people WHERE video_id=?", (vid,)).fetchall()
     lks = con.execute("SELECT url,kind,context FROM links WHERE video_id=?", (vid,)).fetchall()
     chk = con.execute("SELECT * FROM checks WHERE video_id=? ORDER BY check_date", (vid,)).fetchall()
-    h = f"<section class=card id='v-{vid}'><h3><a href='{e(v['url'])}'>{e(v['title'])}</a></h3>"
+    h = f"<section class='card vc' id='v-{vid}'><h3><a href='{e(v['url'])}'>{e(v['title'])}</a></h3>"
     h += f"<div class=meta>👤 {e(v['owner'] or '-')} 님이 저장 · 📺 <a href='{e(v['channel_url'] or '#')}'>{e(v['channel'] or '')}</a> · 업로드 {e(v['upload_date'] or '-')} · {dur(v['duration_sec'])} · 조회 {num(v['view_count'])} · 👍 {num(v['like_count'])} · 댓글 {num(v['comment_count'])}"
     h += f" · 본 날짜 {e(v['watched_at'] or '미기록')}"
     h += f" · 🤖 {e(v['engine'] or 'claude')} · {e(v['model'] or '-')}</div>"
@@ -131,6 +131,41 @@ def build_day(con, day):
             body += "".join(card(con, v) for v in items)
     (OUT / f"{day}.html").write_text(page(f"{day} 리포트", body, "🗓️"), encoding="utf-8")
 
+
+FLOW_CSS = """<style>
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:8px 0}
+.flow .st{flex:1 1 150px;border:1px solid var(--bd);border-radius:10px;padding:8px 10px;background:var(--chip);font-size:13px}
+.flow .st b{display:block;margin-bottom:2px}.flow .st small{color:var(--mu)}
+.flow .ar{align-self:center;color:var(--mu);font-size:18px}
+.smap{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin:8px 0}
+.smap a.n{display:block;border:1px solid var(--bd);border-radius:10px;padding:8px 10px;text-decoration:none;font-size:13px}
+.smap a.n b{display:block;color:var(--ac)}.smap a.n small{color:var(--mu)}
+</style>"""
+
+def how_block():
+    st = [("1️⃣ 수집","재생목록 → yt-dlp<br><small>자막·메타·댓글 (fetch_list, collect, fetcher)</small>"),
+          ("2️⃣ 분석","Claude/agy 가 JSON 생성<br><small>요약·분류·배울 점·사업성·확인 항목 (work.py, analyze.py)</small>"),
+          ("3️⃣ 저장","SQLite data/watchlater.db<br><small>이미 분석한 영상은 다시 안 함 (db.py, main.py)</small>"),
+          ("4️⃣ 보강","지표 설명·시세·의미 해설·매크로 위치·확인 판정<br><small>(indicators.py, autocheck.py)</small>"),
+          ("5️⃣ 리포트","DB만 읽어 HTML/JSON 생성<br><small>(report.py, report_extra.py, stats.py, highlight.py)</small>"),
+          ("6️⃣ 공개","reports/ → nginx<br><small>psncs.iptime.org/yt_watch_later/</small>")]
+    flow = '<span class=ar>›</span>'.join(f"<div class=st><b>{a}</b>{b}</div>" for a, b in st)
+    pages = [("index.html","🏠 index (지금 이 화면)","실행(날짜_시분-LLM)별 리포트 목록"),
+             ("YYYY-MM-DD_HHMM-엔진.html","🗓️ 실행별 리포트","카테고리 → 주제 → 영상 카드"),
+             ("checks_pending.html","⏳ 앞으로 확인할 것","확인 예정 항목"),
+             ("checks_done.html","✅ 확인한 것","판정 결과"),
+             ("indicators.html","📊 지표","설명·시세·의미·매크로 (AI 표기)"),
+             ("indicator_trends.html","📉 지표 추이","날짜별 그래프·중요한 날·상황 설명"),
+             ("stats.html","📈 시청 성향","많이 보는 채널·인물"),
+             ("stats_channels.html","📺 모든 채널","stats 에서 연결"),
+             ("highlights.html","⭐ 인상 깊은 영상","왼쪽 목록·오른쪽 상세"),
+             ("watchlater.json","🧾 전체 데이터","JSON")]
+    smap = "".join((f"<a class=n href='{u}'>" if "YYYY" not in u else "<div class=n style='border:1px dashed var(--bd);border-radius:10px;padding:8px 10px;font-size:13px'>") + f"<b>{t}</b><small>{d}</small>" + ("</a>" if "YYYY" not in u else "</div>") for u, t, d in pages)
+    return (FLOW_CSS + "<details open class=card><summary><b>🔧 이 페이지는 어떻게 만들어지나</b></summary>"
+            "<p class=meta>매일 01:00 cron → run_skill.sh --agy (flock 으로 중복 실행 방지). 수집·DB·리포트는 코드가 하고, LLM 은 JSON 만 만든다. 모든 페이지는 실행 끝에 코드가 다시 만든다.</p>"
+            f"<div class=flow>{flow}</div>"
+            "<p class=meta><b>🗺️ 사이트 맵</b></p>" f"<div class=smap>{smap}</div></details>")
+
 def build_all(con):
     OUT.mkdir(exist_ok=True)
     days = [r[0] for r in con.execute("SELECT DISTINCT COALESCE(run_id,processed_date) k FROM videos WHERE status='done' AND processed_date IS NOT NULL ORDER BY 1 DESC")]
@@ -142,12 +177,14 @@ def build_all(con):
         rows += f"<tr><td><a href='{d}.html'>{d}</a><td>{n}<td>👤 {e(who)}<td>{' '.join(CAT_ICON.get(x, '📌') + e(x) for x in (cats or '').split(','))}</tr>"
     pend = con.execute("SELECT count(*) FROM checks WHERE status='pending'").fetchone()[0]
     due = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<=date('now','localtime') ORDER BY c.check_date").fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body += how_block()
     body += backlog_block(con)
     if due: body += "<section class='card due'><h3>⏰ 지금 확인해야 할 항목</h3>" + checks_table(due, True) + "</section>"
     body += f"<table><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
     import report_extra; report_extra.build(con)
     import stats; stats.build(con)
+    import indicator_trends; indicator_trends.build(con)
     import highlight; highlight.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)
