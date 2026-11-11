@@ -55,8 +55,8 @@ def store(con, v, col, res, model, engine="claude"):
     con.execute("INSERT INTO tags VALUES(?,1,?)", (vid, res["category"]))
     con.execute("INSERT INTO tags VALUES(?,2,?)", (vid, res["subtag"]))
     con.executemany("INSERT INTO tags VALUES(?,3,?)", [(vid, t) for t in res["extra_tags"]])
-    con.executemany("INSERT INTO checks(video_id,kind,target,what_to_check,expectation,check_date) VALUES(?,?,?,?,?,?)",
-                    [(vid, c["kind"], c["target"], c["what_to_check"], c["expectation"], c["check_date"]) for c in res["checks"]])
+    con.executemany("INSERT INTO checks(video_id,kind,target,what_to_check,expectation,if_right,if_wrong,check_date) VALUES(?,?,?,?,?,?,?,?)",
+                    [(vid, c["kind"], c["target"], c["what_to_check"], c["expectation"], c.get("if_right"), c.get("if_wrong"), c["check_date"]) for c in res["checks"]])
     con.commit()
     d = DATA / vid
     (d / "analysis.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")

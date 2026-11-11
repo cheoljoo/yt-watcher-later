@@ -17,7 +17,7 @@ def build(con):
     if not n: return
     total = sum(v["duration_sec"] or 0 for v in vs); watched = sum(1 for v in vs if v["watched_at"])
     body = (f"<h1>📈 내 시청 성향</h1><p class=meta>저장해 둔 영상 {n}개 기준 (분석 완료분) · 총 길이 {hm(total)} · 본 날짜 기록 {watched}개 · "
-            f"<a href='index.html'>목록</a></p>")
+            f"<a href='index.html'>🏠 홈</a></p>")
 
     # 채널별
     ch = defaultdict(list)
@@ -37,7 +37,7 @@ def build(con):
     one = sum(1 for _, l in rows if len(l) == 1)
     body += (f"<h2>📺 많이 보는 채널 TOP {min(TOP, len(rows))} <span class=meta>(전체 {len(rows)}개 채널, 1개짜리 {one}개)</span></h2>"
              f"<p><a href='stats_channels.html'>📺 모든 채널 {len(rows)}개 보기 ›</a></p>{chan_table(TOP)}")
-    (R.OUT / "stats_channels.html").write_text(R.page("모든 채널", f"<h1>📺 모든 채널 ({len(rows)}개)</h1><p class=meta>영상 수 많은 순 · 같으면 총 길이 긴 순 · 채널 이름을 누르면 영상 목록 · <a href='stats.html'>‹ 시청 성향</a> · <a href='index.html'>목록</a></p>{chan_table(len(rows))}", "📺"), encoding="utf-8")
+    (R.OUT / "stats_channels.html").write_text(R.page("모든 채널", f"<h1>📺 모든 채널 ({len(rows)}개)</h1><p class=meta>영상 수 많은 순 · 같으면 총 길이 긴 순 · 채널 이름을 누르면 영상 목록 · <a href='stats.html'>‹ 시청 성향</a> · <a href='index.html'>🏠 홈</a></p>{chan_table(len(rows))}", "📺"), encoding="utf-8")
 
     # 등장 인물별
     byid = {v["id"]: v for v in vs}

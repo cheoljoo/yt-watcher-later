@@ -98,7 +98,7 @@ def build(con):
     ser.sort(key=lambda s: (s["ind"]["category"] or "~", s["ind"]["importance"] != "high", s["name"]))
     days = sorted({d for s in ser for d, _ in s["pts"]})
     body = (f"<h1>📉 지표 추이</h1><p class=meta>날짜별로 DB에 쌓인 지표 값({days[0] if days else '-'} ~ {days[-1] if days else '-'}, {len(days)}일치) · 지표 {len(ser)}개 · "
-            "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='index.html'>목록</a></p>")
+            "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='index.html'>🏠 홈</a></p>")
     body += "<section class=card><h3>🧭 전체 상황</h3>" + situation(con, ser) + "<p class=meta>숫자로 자동 생성한 요약입니다. 지표별 원인 해석은 아래 카드의 'AI 해설'과 대시보드를 참고하세요. 이력이 쌓일수록 정확해집니다.</p></section>"
     mac = con.execute("SELECT date, phase_index FROM macro_daily ORDER BY date").fetchall()
     phase_days = {m["date"] for a, m in zip(mac, mac[1:]) if a["phase_index"] != m["phase_index"]}
