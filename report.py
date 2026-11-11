@@ -36,9 +36,9 @@ def checks_table(rows, with_video=False):
     h = "<table class=num><tr><th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>상태·결과</tr>"
     for c in rows:
         res = f"<span class=st-{c['status']}>{ST_ICON.get(c['status'], '')} {e(c['status'])}</span>"
-        if c["checked_at"]: res += f" ({e(c['checked_at'])})<br>{e(c['result'] or '')}<br><i>{e(c['opinion'] or '')}</i> {e(c['reason'] or '')}"
+        if c["checked_at"]: res += f" ({e(c['checked_at'])})<br>{e(c['result'] or '')}{('<br><span class=meta>📈 업로드→확인일 변화: ' + e(c['since_upload']) + '</span>') if c['since_upload'] else ''}<br><i>{e(c['opinion'] or '')}</i> {e(c['reason'] or '')}"
         vid = f"<br><span class=meta>{e((c['title'] or '')[:40])}</span>" if with_video else ""
-        h += f"<tr><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}{vid}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span><td>{res}</tr>"
+        h += f"<tr><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}{vid}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>🟢 맞을 때: ' + e(c['if_right']) + '</span>') if c['if_right'] else ''}{('<br><span class=meta>🔴 틀릴 때: ' + e(c['if_wrong']) + '</span>') if c['if_wrong'] else ''}<td>{res}</tr>"
     return h + "</table>"
 
 def other_runs(con, v):
@@ -90,7 +90,8 @@ def card(con, v):
         icon = {"가능": "💰", "조건부": "🟡", "어려움": "⚪"}.get(biz.get("possible"), "💰")
         h += f"<h2>{icon} 돈 버는 사업이 될 수 있나</h2><p><b>{e(biz.get('possible', ''))}</b> — {e(biz.get('idea', ''))}</p><p><b>어떻게</b> {e(biz.get('how', ''))}</p>"
     if v["comments_insight"] and v["comments_insight"] != "없음": h += f"<h2>💬 댓글에서 의미 있는 내용</h2><p>{e(v['comments_insight'])}</p>"
-    return h + "</section>"
+    import opinions
+    return h + opinions.box(con, vid) + "</section>"
 
 CAT_ORDER = ["경제", "AI", "IT", "정치·사회", "과학·건강", "기타"]
 
@@ -119,7 +120,7 @@ def build_day(con, day):
     vs = con.execute("SELECT * FROM videos WHERE COALESCE(run_id,processed_date)=? AND status='done'", (day,)).fetchall()
     due = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<=? ORDER BY c.check_date", (day,)).fetchall()
     g = grouped(vs)
-    body = f"<h1>🗓️ {e(day)} 처리 리포트</h1><p class=meta>영상 {len(vs)}개 · 카테고리별 → 비슷한 주제(2단계 태그)별 → 업로드일 오래된 순 · <a href='index.html'>전체 목록</a></p>"
+    body = f"<h1>🗓️ {e(day)} 처리 리포트</h1><p class=meta>영상 {len(vs)}개 · 카테고리별 → 비슷한 주제(2단계 태그)별 → 업로드일 오래된 순 · <a href='index.html'>🏠 홈</a></p>"
     import report_extra
     body += report_extra.macro_block(con, day[:10])
     if day[:10] == D.today(): body += backlog_block(con)
@@ -131,7 +132,8 @@ def build_day(con, day):
         for t, items in subs:
             body += f"<h3 class=sub-h>{e(t)} <span class=meta>({len(items)}) · {e(items[0]['upload_date'] or '-')} ~ {e(items[-1]['upload_date'] or '-')}</span></h3>"
             body += "".join(card(con, v) for v in items)
-    (OUT / f"{day}.html").write_text(page(f"{day} 리포트", body, "🗓️"), encoding="utf-8")
+    import opinions
+    (OUT / f"{day}.html").write_text(page(f"{day} 리포트", opinions.OP_CSS + body + opinions.OP_JS, "🗓️"), encoding="utf-8")
 
 
 FLOW_CSS = """<style>
@@ -154,12 +156,13 @@ def how_block():
     flow = '<span class=ar>›</span>'.join(f"<div class=st><b>{a}</b>{b}</div>" for a, b in st)
     pages = [("index.html","🏠 index (지금 이 화면)","실행(날짜_시분-LLM)별 리포트 목록"),
              ("YYYY-MM-DD_HHMM-엔진.html","🗓️ 실행별 리포트","카테고리 → 주제 → 영상 카드"),
-             ("checks_pending.html","⏳ 앞으로 확인할 것","확인 예정 항목"),
+             ("checks_pending.html","⏳ 앞으로 확인할 것","확인 예정 항목(예상이 맞을 때/틀릴 때 포함)"),
              ("checks_done.html","✅ 확인한 것","판정 결과"),
              ("indicators.html","📊 지표","설명·시세·의미·매크로 (AI 표기)"),
              ("indicator_trends.html","📉 지표 추이","날짜별 그래프·중요한 날·상황 설명"),
              ("stats.html","📈 시청 성향","많이 보는 채널·인물"),
              ("stats_channels.html","📺 모든 채널","stats 에서 연결"),
+             ("opinions.html","💬 나와 AI 의견","내가 남긴 의견과 AI 의견"),
              ("highlights.html","⭐ 인상 깊은 영상","왼쪽 목록·오른쪽 상세"),
              ("watchlater.json","🧾 전체 데이터","JSON")]
     smap = "".join((f"<a class=n href='{u}'>" if "YYYY" not in u else "<div class=n style='border:1px dashed var(--bd);border-radius:10px;padding:8px 10px;font-size:13px'>") + f"<b>{t}</b><small>{d}</small>" + ("</a>" if "YYYY" not in u else "</div>") for u, t, d in pages)
@@ -178,15 +181,19 @@ def build_all(con):
         who = ", ".join(r[0] or "-" for r in con.execute("SELECT DISTINCT owner FROM videos WHERE COALESCE(run_id,processed_date)=? AND status='done'", (d,)))
         rows += f"<tr><td><a href='{d}.html'>{d}</a><td>{n}<td>👤 {e(who)}<td>{' '.join(CAT_ICON.get(x, '📌') + e(x) for x in (cats or '').split(','))}</tr>"
     pend = con.execute("SELECT count(*) FROM checks WHERE status='pending'").fetchone()[0]
-    due = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<=date('now','localtime') ORDER BY c.check_date").fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    last = con.execute("SELECT max(checked_at) FROM checks WHERE checked_at IS NOT NULL").fetchone()[0]
+    yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall() if last else []
+    late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += how_block()
     body += backlog_block(con)
-    if due: body += "<section class='card due'><h3>⏰ 지금 확인해야 할 항목</h3>" + checks_table(due, True) + "</section>"
+    if yday: body += f"<section class=card><h3>✅ 어제 확인한 항목 ({len(yday)})</h3><p class=meta>확인일이 어제까지인 항목을 {e(last[:10])} 새벽 실행에서 AI가 판정한 결과입니다. 오늘 날짜 항목은 내일 새벽에 확인합니다.</p>" + checks_table(yday, True) + "</section>"
+    if late: body += f"<section class='card due'><h3>🟠 확인일이 지났지만 아직 확인 못 한 항목 ({len(late)})</h3><p class=meta>사용량 한도 등으로 못 한 것은 다음 실행에서 이어서 확인합니다.</p>" + checks_table(late, True) + "</section>"
     body += f"<table><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
     import report_extra; report_extra.build(con)
     import stats; stats.build(con)
     import indicator_trends; indicator_trends.build(con)
     import highlight; highlight.build(con)
+    import opinions; opinions.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)

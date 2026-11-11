@@ -31,10 +31,12 @@ SCHEMA = {
                                 "required": ["name", "why"],
                                 "properties": {"name": {"type": "string"}, "why": {"type": "string"}}}}}},
     "checks": {"type": "array", "items": {"type": "object",
-               "required": ["kind", "target", "what_to_check", "expectation", "check_date"],
+               "required": ["kind", "target", "what_to_check", "expectation", "if_right", "if_wrong", "check_date"],
                "properties": {"kind": {"type": "string", "enum": ["indicator", "stock", "event"]},
                               "target": {"type": "string"}, "what_to_check": {"type": "string"},
                               "expectation": {"type": "string"},
+                              "if_right": {"type": "string", "description": "예상이 맞았을 때 시청자가 어떻게 해야 하는지(행동·판단)"},
+                              "if_wrong": {"type": "string", "description": "예상이 틀렸을 때 시청자가 어떻게 해야 하는지(행동·판단)"},
                               "check_date": {"type": "string", "description": "YYYY-MM-DD, 반드시 오늘 이후"}}}},
   },
 }
@@ -61,6 +63,7 @@ PROMPT = """당신은 YouTube 영상 분석가입니다. 아래 입력(제목/�
 - checks: 나중에 영상의 주장·전망이 맞았는지 검증할 항목. kind=indicator|stock|event, target(지표/종목/이벤트명),
   what_to_check(무엇을 확인), expectation(영상의 예상·주장), check_date(확인할 미래 날짜 YYYY-MM-DD, 오늘 이후 — 발표일·만기·실적일 등
   구체적 시점이 있으면 그 날짜, 없으면 합리적 시점). 경제 영상은 가능하면 2~6개, 그 외는 근거가 있을 때만.
+  if_right = 예상이 맞았을 때 시청자가 어떻게 해야 하는지(보유 유지·비중 확대·계획 진행 등 구체적 행동·판단), if_wrong = 예상이 틀렸을 때 어떻게 해야 하는지(손절·재검토·계획 수정 등). 투자 권유가 아니라 판단 기준으로 쓰세요.
 - 영상에 없는 내용을 지어내지 마세요.
 """
 

@@ -15,14 +15,14 @@ import argparse, hashlib, json, pathlib, shutil, sys
 from jsonschema import Draft202012Validator
 import db as D
 import main as M
-import indicators as I, autocheck as A, report, export_json
+import opinions as OP, indicators as I, autocheck as A, report, export_json
 from analyze import SCHEMA as VIDEO_SCHEMA, build_request, CATEGORIES
 from fetcher import collect_many, write_log
 
 W = pathlib.Path("data/_work")
 COL, TASKS, INP, SCH, STATE = W / "col", W / "tasks", W / "in", W / "schema", W / "state.json"
-STAGES = ["video", "enrich", "map", "meaning", "phase", "check"]
-SCHEMAS = {"video": VIDEO_SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA}
+STAGES = ["video", "enrich", "map", "meaning", "phase", "check", "checkfill", "opinion"]
+SCHEMAS = {"video": VIDEO_SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA, "checkfill": A.FILL_SCHEMA, "opinion": OP.SCHEMA}
 MAX_TRANSCRIPT = 60000      # 자막이 이보다 길면 앞·뒤만 남김(컨텍스트 보호). 중앙값은 약 9천자.
 cfg = M.cfg
 import os
@@ -97,12 +97,22 @@ def gen_phase(con, st):
     if key: write_task("phase", ["phase"], I.phase_prompt(today), "\n".join(key))
 
 def gen_check(con, st):
-    due = [c for c in A.due_checks(con) if str(c["id"]) not in tried(st, "check")]
+    due = [c for c in A.due_checks(con, 300) if str(c["id"]) not in tried(st, "check")]
     if not due: return
     items = A.build_items(con, due)
     for ch in chunks(items, A.CHUNK): write_task("check", [i for i, _ in ch], A.PROMPT, "\n".join(t for _, t in ch))
 
-GEN = {"video": gen_video, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check}
+def gen_checkfill(con, st):
+    """예전에 등록돼 '예상이 맞을 때/틀릴 때' 가 없는 대기 항목을 채운다(한 번에 최대 A.FILL_PER_RUN 개)."""
+    rows = [c for c in A.fill_candidates(con) if str(c["id"]) not in tried(st, "checkfill")]
+    for ch in chunks(rows, 25): write_task("checkfill", [c["id"] for c in ch], A.FILL_PROMPT, "\n".join(A.fill_line(c) for c in ch))
+
+def gen_opinion(con, st):
+    """내 의견은 있고 AI 의견이 없는 영상 -> AI 의견 작업."""
+    rows = [r for r in OP.pending(con) if r["video_id"] not in tried(st, "opinion")]
+    for ch in chunks(rows, 8): write_task("opinion", [r["video_id"] for r in ch], OP.PROMPT, "\n".join(OP.task_line(r) for r in ch))
+
+GEN = {"video": gen_video, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion}
 
 
 # ── 명령 ────────────────────────────────────────────────────────
@@ -185,6 +195,8 @@ def cmd_submit(a):
     elif kind == "map": I.apply_map(con, data["items"]); msg = f"출처 매핑 {len(data['items'])}개"
     elif kind == "meaning": I.apply_meaning(con, data["items"]); msg = f"의미 해설 {len(data['items'])}개"
     elif kind == "phase": I.apply_phase(con, data); msg = f"매크로 위치 {data['phase_index']}"
+    elif kind == "opinion": msg = f"AI 의견 {OP.apply_ai(con, data['items'])}건"
+    elif kind == "checkfill": msg = f"예상 맞을 때/틀릴 때 {A.apply_fill(con, data['items'])}건"
     elif kind == "check": msg = f"자동 판정 {A.apply(con, data['items'])}건"
     mark_tried(st, kind, t["keys"]); st["round_submitted"] += 1; st["total_submitted"] = st.get("total_submitted", 0) + 1
     save_state(st); tf.unlink(); (INP / f"{a.tid}.txt").unlink(missing_ok=True)

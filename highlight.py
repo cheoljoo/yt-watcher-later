@@ -146,7 +146,7 @@ def build(con=None):
     con = con or D.connect(); R.OUT.mkdir(exist_ok=True)
     rows = con.execute("SELECT * FROM highlights ORDER BY added_at DESC").fetchall()
     nav = "".join(f"<a href='#h-{e(r['video_id'])}'>{e(r['title'])}<small>{e(r['channel'] or '')} · 담은 날 {e((r['added_at'] or '')[:10])}</small></a>" for r in rows)
-    body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>직접 고른 영상을 아주 상세히 정리한 모음 · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>목록</a> · "
+    body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>직접 고른 영상을 아주 상세히 정리한 모음 · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>🏠 홈</a> · "
             f"추가: Claude/agy 에서 <code>/yt-highlight URL</code></p>")
     if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r, i, _earlier(con, r['video_id'])) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
     else: body += "<p class=meta>아직 없습니다.</p>"

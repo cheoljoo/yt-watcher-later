@@ -65,9 +65,9 @@ def _rows(rows, done=None):
     for c in rows:
         ic, tx = _light(c)
         if c["checked_at"]:
-            res = f"<b>{e(c['checked_at'][:10])}</b><br>{e(c['result'] or '')}<br><i>{e(c['opinion'] or '')}</i> <span class=meta>{e(c['reason'] or '')}</span>"
+            res = f"<b>{e(c['checked_at'][:10])}</b><br>{e(c['result'] or '')}{('<br><span class=meta>📈 업로드→확인일 변화: ' + e(c['since_upload']) + '</span>') if c['since_upload'] else ''}<br><i>{e(c['opinion'] or '')}</i> <span class=meta>{e(c['reason'] or '')}</span>"
         else: res = "<span class=meta>아직 확인 전</span>" + (f"<br><span class=meta>{e(c['reason'])}</span>" if c["reason"] else "")
-        h += f"<tr><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>근거: ' + e(c['rationale']) + '</span>') if c['rationale'] else ''}<td>{_vlink(c)}<td>{res}</tr>"
+        h += f"<tr><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>근거: ' + e(c['rationale']) + '</span>') if c['rationale'] else ''}{('<br><span class=meta>🟢 예상이 맞을 때: ' + e(c['if_right']) + '</span>') if c['if_right'] else ''}{('<br><span class=meta>🔴 예상이 틀릴 때: ' + e(c['if_wrong']) + '</span>') if c['if_wrong'] else ''}<td>{_vlink(c)}<td>{res}</tr>"
     return h + "</table>"
 
 SEL = "SELECT c.*, v.title, COALESCE(v.run_id, v.processed_date) AS processed_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id"
@@ -76,13 +76,13 @@ def build_checks(con):
     today = D.today()
     pend = con.execute(SEL + " WHERE c.status='pending' ORDER BY c.check_date, c.id").fetchall()
     due = [c for c in pend if c["check_date"] <= today]
-    body = f"<h1>⏳ 앞으로 확인할 것</h1><p class=meta>시간순(확인일 빠른 순) · 미확인 {len(pend)}개 · <a href='index.html'>목록</a> · <a href='checks_done.html'>확인한 것 ›</a> · <a href='indicators.html'>지표 ›</a></p>" + LEGEND
+    body = f"<h1>⏳ 앞으로 확인할 것</h1><p class=meta>시간순(확인일 빠른 순) · 미확인 {len(pend)}개 · <a href='index.html'>🏠 홈</a> · <a href='checks_done.html'>확인한 것 ›</a> · <a href='indicators.html'>지표 ›</a></p>" + LEGEND
     if due: body += f"<section class='card due'><h3>⏰ 지금 확인할 시점이 된 것 ({len(due)})</h3>{_rows(due)}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (시간순)</h3>{_rows(pend)}</section>"
     (OUT / "checks_pending.html").write_text(page("앞으로 확인할 것", body, "⏳"), encoding="utf-8")
     dn = con.execute(SEL + " WHERE c.status!='pending' ORDER BY c.checked_at DESC, c.id").fetchall()
     tdy = [c for c in dn if (c["checked_at"] or "").startswith(today)]
-    body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 오늘 확인한 것이 맨 앞, 그 아래에 오늘 것을 포함한 전체를 시간순으로 · <a href='index.html'>목록</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
+    body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 오늘 확인한 것이 맨 앞, 그 아래에 오늘 것을 포함한 전체를 시간순으로 · <a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
     body += f"<section class='card'><h3>🆕 오늘({today}) 확인한 것 ({len(tdy)})</h3>{_rows(tdy) if tdy else '<p class=meta>오늘 확인한 항목이 없습니다. <code>uv run check.py set ID --status ...</code> 로 기록합니다.</p>'}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (확인한 순서, 오래된 것부터)</h3>{_rows(sorted(dn, key=lambda c: (c['checked_at'] or '', c['id']))) if dn else '<p class=meta>아직 없습니다.</p>'}</section>"
     (OUT / "checks_done.html").write_text(page("확인한 것", body, "✅"), encoding="utf-8")
@@ -111,7 +111,7 @@ def _ind_card(i, v, srcs):
 
 def build_indicators(con):
     last = con.execute("SELECT max(date) FROM indicator_values").fetchone()[0]
-    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>목록</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a></p>" + IND_LEGEND + macro_block(con)
+    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a></p>" + IND_LEGEND + macro_block(con)
     if not last:
         body += "<p class=meta>아직 수집된 지표 값이 없습니다(일일 실행에서 수집).</p>"
         (OUT / "indicators.html").write_text(page("지표", body, "📊"), encoding="utf-8"); return
