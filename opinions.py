@@ -89,21 +89,74 @@ def box(con, vid):
         if my: h += "<div class=meta>AI 의견 대기 중 — 다음 새벽 실행에서 달립니다. 그 전까지는 수정할 수 있습니다.</div>"
     return h + "</div>"
 
+LIST_CSS = """<style>
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);padding:10px 0;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.bar label{font-size:13px;color:var(--mu)}.bar select{font:inherit;margin-left:4px;padding:4px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg)}
+.pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}.pager button{font:inherit;padding:3px 11px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);cursor:pointer}
+.pager button.on{background:var(--ac);color:#fff;border-color:var(--ac)}.pager button:disabled{opacity:.4;cursor:default}
+details.oi{border:1px solid var(--bd);border-radius:12px;padding:8px 12px;margin:10px 0;background:var(--card)}
+details.oi>summary{cursor:pointer;list-style:none}details.oi>summary::-webkit-details-marker{display:none}
+details.oi>summary b.t{font-size:15px}.cl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;font-size:13.5px;margin-top:3px}
+.cl.ai{color:var(--mu)}details.oi[open]>summary .cl{display:none}
+.bd{display:inline-block;font-size:12px;border-radius:99px;padding:0 9px;margin-left:6px;background:var(--chip)}.bd.ok{background:var(--ac);color:#fff}
+</style>"""
+
+LIST_JS = """<script>(function(){
+var items=[].slice.call(document.querySelectorAll('.oi')),box=document.getElementById('oi-list'),
+ fA=document.getElementById('f-ai'),fT=document.getElementById('f-topic'),fR=document.getElementById('f-recent'),fP=document.getElementById('f-per'),
+ info=document.getElementById('oi-info'),pg=[document.getElementById('pg-top'),document.getElementById('pg-bot')],page=1,view=[];
+function cutoff(days){var d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10)}
+function apply(){var a=fA.value,t=fT.value,r=fR.value,co=r==='all'?'':cutoff(+r);
+ view=items.filter(function(x){if(a==='yes'&&x.dataset.ai!=='1')return false;if(a==='no'&&x.dataset.ai==='1')return false;
+  if(t!=='all'){var k=t.slice(0,2),v=t.slice(2);if(k==='c:'&&x.dataset.c!==v)return false;if(k==='s:'&&x.dataset.s!==v)return false}
+  return !co||x.dataset.d>=co});render()}
+function render(){var per=+fP.value,n=view.length,pages=Math.max(1,Math.ceil(n/per));if(page>pages)page=pages;
+ var a=(page-1)*per,b=Math.min(n,a+per),show=new Set(view.slice(a,b));
+ items.forEach(function(x){x.hidden=!show.has(x)});
+ view.slice(a,b).forEach(function(x,i){x.querySelector('.no').textContent='#'+(a+i+1)+' ';box.appendChild(x)});
+ info.textContent=n?('조건에 맞는 의견 '+n+'개 중 '+(a+1)+'–'+b+'번째 · '+page+'/'+pages+' 쪽'):'조건에 맞는 의견이 없습니다';
+ pg.forEach(function(p){p.innerHTML='';function btn(l,pn,dis,on){var q=document.createElement('button');q.textContent=l;q.disabled=dis;if(on)q.className='on';q.onclick=function(){page=pn;render();window.scrollTo(0,0)};p.appendChild(q)}
+  btn('‹ 이전',page-1,page<=1);var lo=Math.max(1,page-3),hi=Math.min(pages,page+3);if(lo>1)btn('1',1,false,page===1);if(lo>2)p.appendChild(document.createTextNode('…'));
+  for(var i=lo;i<=hi;i++)btn(String(i),i,false,i===page);if(hi<pages-1)p.appendChild(document.createTextNode('…'));if(hi<pages)btn(String(pages),pages,false,page===pages);btn('다음 ›',page+1,page>=pages)})}
+[fA,fT,fR].forEach(function(s){s.onchange=function(){page=1;apply()}});fP.onchange=function(){page=1;render()};apply()})();
+</script>"""
+
+def _head(text, n=110):
+    """summary 용: 처음 부분(공백 정리 후 n자)."""
+    t = " ".join((text or "").split())
+    return t[:n] + ("…" if len(t) > n else "")
+
 def build(con):
-    """'나와 AI 의견' 페이지: 의견을 남긴 영상 목록(최근 저장 순)."""
+    """'나와 AI 의견' 페이지. 날짜·주제별 보기와 같은 선택(주제·기간·한 페이지 수) + AI 의견 있음/없음. 항목은 접힌 상태(summary=처음 부분)."""
     import report as R
-    rows = con.execute("""SELECT o.*, v.title, v.url, v.channel, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id
+    rows = con.execute("""SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id
                           WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' ORDER BY o.my_at DESC""").fetchall()
     n_ai = sum(1 for r in rows if r["ai_reply"])
-    body = (f"<h1>💬 나와 AI 의견</h1><p class=meta>내가 남긴 의견 {len(rows)}개 · AI 의견 달림 {n_ai}개 · 대기 {len(rows) - n_ai}개 · <a href='index.html'>🏠 홈</a> · 의견은 각 날짜 리포트의 영상 카드 맨 아래에서 씁니다</p>")
-    if not rows: body += "<p class=meta>아직 남긴 의견이 없습니다.</p>"
-    body += "<div class=numbered>"
+    cats, subs = {}, {}
     for r in rows:
-        body += (f"<section class='card vc'><h3><a href='{e(r['page'])}.html#v-{e(r['video_id'])}'>{e(r['title'])}</a></h3>"
-                 f"<div class=meta>📺 {e(r['channel'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))}</div>"
-                 f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>")
-        if r["ai_reply"]: body += f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
-        else: body += "<p class=meta>🤖 AI 의견 대기 중 (다음 새벽 실행에서 달립니다)</p>"
-        body += "</section>"
-    body += "</div>"
-    (R.OUT / "opinions.html").write_text(R.page("나와 AI 의견", OP_CSS + body, "💬"), encoding="utf-8")
+        c, s = r["category"] or "기타", r["subtag"] or "기타"
+        cats[c] = cats.get(c, 0) + 1; subs.setdefault(c, {})[s] = subs.setdefault(c, {}).get(s, 0) + 1
+    order = sorted(cats, key=lambda c: R.CAT_ORDER.index(c) if c in R.CAT_ORDER else len(R.CAT_ORDER))
+    topic = "<option value=all>모두</option>"
+    for c in order:
+        topic += f"<option value='c:{e(c)}'>{R.CAT_ICON.get(c, '📌')} {e(c)} ({cats[c]})</option>"
+        for s, n in sorted(subs[c].items(), key=lambda kv: (-kv[1], kv[0])): topic += f"<option value='s:{e(c)}/{e(s)}'>&nbsp;&nbsp;└ {e(s)} ({n})</option>"
+    recent = "<option value=all>모두</option>" + "".join(f"<option value={d}>{t}</option>" for d, t in ((7, "최근 1주일"), (30, "최근 1개월"), (90, "최근 3개월"), (180, "최근 6개월"), (365, "최근 1년"), (730, "최근 2년")))
+    per = "".join(f"<option value={n}>{n}개</option>" for n in (20, 50, 100))
+    ai = f"<option value=all>모두 ({len(rows)})</option><option value=yes>AI 의견 있는 것 ({n_ai})</option><option value=no>AI 의견 없는 것 ({len(rows) - n_ai})</option>"
+    items = ""
+    for r in rows:
+        has = bool(r["ai_reply"])
+        items += (f"<details class=oi hidden data-ai={1 if has else 0} data-d='{e((r['my_at'] or '0000')[:10])}' data-c='{e(r['category'] or '기타')}' data-s='{e((r['category'] or '기타') + '/' + (r['subtag'] or '기타'))}'>"
+                  f"<summary><b class=t><span class=no></span>{e(r['title'])}</b><span class='bd{' ok' if has else ''}'>{'🤖 AI 의견 있음' if has else '⏳ AI 의견 대기'}</span> <span class=meta>{e((r['my_at'] or '')[:10])}</span>"
+                  f"<div class=cl>💬 {e(_head(r['my_opinion']))}</div>" + (f"<div class='cl ai'>🤖 {e(_head(r['ai_reply']))}</div>" if has else "") + "</summary>"
+                  f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{e(r['page'])}.html#v-{e(r['video_id'])}'>영상 카드로 가기 ›</a></div>"
+                  f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>"
+                  + (f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
+                     if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + "</details>")
+    body = (f"<h1>💬 나와 AI 의견</h1><p class=meta>내가 남긴 의견 {len(rows)}개 · AI 의견 달림 {n_ai}개 · 대기 {len(rows) - n_ai}개 · 내가 저장한 날짜 최신순 · 항목을 누르면 펼쳐집니다 · <a href='index.html'>🏠 홈</a> · 의견은 각 날짜 리포트나 <a href='browse.html'>🗂️ 날짜·주제별 보기</a>의 영상 카드 맨 아래에서 씁니다</p>")
+    if not rows: body += "<p class=meta>아직 남긴 의견이 없습니다. 영상 카드 맨 아래 칸에 의견을 적고 저장하면 여기에 나타납니다.</p>"
+    body += (f"<div class=bar><label>🤖 AI 의견 <select id=f-ai>{ai}</select></label><label>🏷️ 주제 <select id=f-topic>{topic}</select></label>"
+             f"<label>📅 기간 <select id=f-recent>{recent}</select></label><label>📄 한 페이지 <select id=f-per>{per}</select></label></div>"
+             f"<p class=meta id=oi-info></p><div class=pager id=pg-top></div><div id=oi-list>{items}</div><div class=pager id=pg-bot></div>")
+    (R.OUT / "opinions.html").write_text(R.page("나와 AI 의견", OP_CSS + LIST_CSS + body + LIST_JS, "💬"), encoding="utf-8")
