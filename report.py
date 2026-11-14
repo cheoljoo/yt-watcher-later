@@ -155,7 +155,7 @@ def how_block():
           ("6️⃣ 공개","reports/ → nginx<br><small>psncs.iptime.org/yt_watch_later/</small>")]
     flow = '<span class=ar>›</span>'.join(f"<div class=st><b>{a}</b>{b}</div>" for a, b in st)
     pages = [("index.html","🏠 index (지금 이 화면)","실행(날짜_시분-LLM)별 리포트 목록"),
-             ("YYYY-MM-DD_HHMM-엔진.html","🗓️ 실행별 리포트","카테고리 → 주제 → 영상 카드"),
+             ("#runs","🗓️ 실행별 리포트","카테고리 → 주제 → 영상 카드 (아래 처리 목록에서 선택)"),
              ("checks_pending.html","⏳ 앞으로 확인할 것","확인 예정 항목(예상이 맞을 때/틀릴 때 포함)"),
              ("checks_done.html","✅ 확인한 것","판정 결과"),
              ("indicators.html","📊 지표","설명·시세·의미·매크로 (AI 표기)"),
@@ -164,8 +164,9 @@ def how_block():
              ("stats_channels.html","📺 모든 채널","stats 에서 연결"),
              ("opinions.html","💬 나와 AI 의견","내가 남긴 의견과 AI 의견"),
              ("highlights.html","⭐ 인상 깊은 영상","왼쪽 목록·오른쪽 상세"),
+             ("browse.html","🗂️ 날짜·주제별 보기","업로드일 최신순, 주제·기간·페이지 크기 선택"),
              ("watchlater.json","🧾 전체 데이터","JSON")]
-    smap = "".join((f"<a class=n href='{u}'>" if "YYYY" not in u else "<div class=n style='border:1px dashed var(--bd);border-radius:10px;padding:8px 10px;font-size:13px'>") + f"<b>{t}</b><small>{d}</small>" + ("</a>" if "YYYY" not in u else "</div>") for u, t, d in pages)
+    smap = "".join(f"<a class=n href='{u}'><b>{t}</b><small>{d}</small></a>" for u, t, d in pages)
     return (FLOW_CSS + "<details open class=card><summary><b>🔧 이 페이지는 어떻게 만들어지나</b></summary>"
             "<p class=meta>매일 01:00 cron → run_skill.sh --agy (flock 으로 중복 실행 방지). 수집·DB·리포트는 코드가 하고, LLM 은 JSON 만 만든다. 모든 페이지는 실행 끝에 코드가 다시 만든다.</p>"
             f"<div class=flow>{flow}</div>"
@@ -184,16 +185,17 @@ def build_all(con):
     last = con.execute("SELECT max(checked_at) FROM checks WHERE checked_at IS NOT NULL").fetchone()[0]
     yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall() if last else []
     late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += how_block()
     body += backlog_block(con)
     if yday: body += f"<section class=card><h3>✅ 어제 확인한 항목 ({len(yday)})</h3><p class=meta>확인일이 어제까지인 항목을 {e(last[:10])} 새벽 실행에서 AI가 판정한 결과입니다. 오늘 날짜 항목은 내일 새벽에 확인합니다.</p>" + checks_table(yday, True) + "</section>"
     if late: body += f"<section class='card due'><h3>🟠 확인일이 지났지만 아직 확인 못 한 항목 ({len(late)})</h3><p class=meta>사용량 한도 등으로 못 한 것은 다음 실행에서 이어서 확인합니다.</p>" + checks_table(late, True) + "</section>"
-    body += f"<table><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
+    body += f"<table id=runs><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
     import report_extra; report_extra.build(con)
     import stats; stats.build(con)
     import indicator_trends; indicator_trends.build(con)
     import highlight; highlight.build(con)
+    import browse; browse.build(con)
     import opinions; opinions.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)
