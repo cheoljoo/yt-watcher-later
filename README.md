@@ -99,3 +99,6 @@ uv run check.py watched VIDEO_ID [YYYY-MM-DD]
 ## 라이선스
 
 Apache License 2.0 — [LICENSE](LICENSE) 참고.
+
+## DB 백업/복구
+`uv run dbbackup.py dump` 는 DB 를 `~/yt-watcher-later-backup`(또는 `$YT_BACKUP_DIR`)에 `schema.sql` + 표별 `<표>.jsonl`(행당 한 줄, 기본키 순)로 저장한다. 바뀐 행만 git diff 에 나타난다. 폴더가 있으면 `work.py finish` 가 매일 자동 갱신한다. 복구: `uv run dbbackup.py restore 백업폴더 새DB경로`, 비교: `verify`. 개인 의견·자막이 들어 있으므로 공개 저장소가 아닌 별도 비공개 저장소에 둘 것.

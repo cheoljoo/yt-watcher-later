@@ -222,6 +222,10 @@ def cmd_status(a):
 def cmd_finish(a):
     con = D.connect()
     report.build_all(con); print("JSON:", export_json.export(con), export_json.export(con, "data/watchlater_full.json", True), flush=True)
+    import dbbackup                                     # 백업 폴더가 있으면(= 사용 설정) DB 를 텍스트로 덤프. 실패해도 실행은 계속
+    if dbbackup.DEFAULT.exists():
+        try: n = dbbackup.dump(); print(f"DB 백업 → {dbbackup.DEFAULT} ({sum(n.values())}행)", flush=True)
+        except Exception as ex: print("DB 백업 실패:", ex, flush=True)
 
 
 if __name__ == "__main__":
