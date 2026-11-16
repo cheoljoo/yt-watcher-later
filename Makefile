@@ -20,7 +20,7 @@ BACKUP  ?= $(or $(YT_BACKUP_DIR),$(HOME)/yt-watcher-later-backup)
 .DEFAULT_GOAL := help
 .PHONY: help report daily daily-claude collect status finish check-due export \
         opinion-status opinion-restart opinion-log cron-show \
-        backup backup-verify backup-restore backup-commit backup-push
+        backup backup-verify backup-restore backup-push
 
 help: ## 이 도움말 보기
 	@echo "yt-watcher-later — 사용 가능한 make 대상"; echo
@@ -86,8 +86,5 @@ backup-restore: ## 백업 → 새 DB 파일로 복구:  make backup-restore DEST
 	$(UV) dbbackup.py restore $(BACKUP) $(DEST)
 	@echo "복구본 확인 후, 실제 DB 로 쓰려면 서비스·cron 을 멈추고 직접 data/watchlater.db 와 교체하세요."
 
-backup-commit: backup ## 백업을 새로 덤프하고 백업 저장소에 commit (변경 없으면 아무것도 안 함)
-	cd $(BACKUP) && git add -A && { git diff --cached --quiet && echo "변경 없음" || git commit -q -m "DB 백업 $$(date +%F)" && git log --oneline -1; }
-
-backup-push: backup-commit ## backup-commit 후 백업 비공개 저장소로 push
-	cd $(BACKUP) && git push
+backup-push: ## 덤프 + README·HISTORY 갱신 + 백업 저장소 commit + push (매일 새벽 run_skill.sh 끝에서도 자동 실행)
+	$(UV) dbbackup.py sync $(BACKUP)

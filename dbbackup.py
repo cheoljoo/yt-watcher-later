@@ -3,11 +3,12 @@
   uv run dbbackup.py dump [백업폴더]              # DB -> 백업폴더 (schema.sql + 표마다 <표>.jsonl)
   uv run dbbackup.py restore 백업폴더 새DB경로      # 백업 -> 새 SQLite 파일 (이미 있으면 거부)
   uv run dbbackup.py verify [백업폴더]             # 지금 DB 와 백업이 같은지 비교
+  uv run dbbackup.py sync [백업폴더]               # dump + README.md·HISTORY.md 갱신 + git commit + push (run_skill.sh 끝에서 호출)
 
 형식: 표 하나 = 파일 하나, 행 하나 = 한 줄(JSON), 기본키 순 정렬. 그래서 git 은 바뀐 줄만 diff·압축한다.
 기본 백업폴더: 환경변수 YT_BACKUP_DIR 또는 ~/yt-watcher-later-backup  (※ 공개 저장소가 아닌 별도 비공개 저장소 권장 — 개인 의견·시청 기록·자막 포함)
 """
-import json, os, pathlib, sqlite3, sys
+import datetime, json, os, pathlib, sqlite3, subprocess, sys
 import db as D
 
 DEFAULT = pathlib.Path(os.environ.get("YT_BACKUP_DIR", pathlib.Path.home() / "yt-watcher-later-backup"))
@@ -69,11 +70,77 @@ def verify(src=None):
         if have != now: bad.append(f"{t}: DB {len(now)}행 / 백업 {'없음' if have is None else len(have)}행" + ("" if have is None or len(have) != len(now) else " (내용 다름)"))
     return bad
 
+def _git(out, *args, timeout=600):
+    return subprocess.run(["git", "-C", str(out), *args], capture_output=True, text=True, timeout=timeout)
+
+README = """# yt-watcher-later DB 백업
+
+`yt-watcher-later` 프로젝트의 SQLite DB(`data/watchlater.db`)를 **텍스트로 저장**한 비공개 백업 저장소입니다.
+의견·시청 기록·자막이 들어 있으므로 공개하면 안 됩니다.
+
+## 마지막 백업
+- 시각: **{now}**
+- 원본 DB: `data/watchlater.db` ({size:.1f} MB), 프로젝트 커밋 `{rev}`
+- 총 {total}행 / {ntab}개 표
+- 이번 백업에서 바뀐 것: {changed}
+
+| 표 | 행 수 |
+|---|---:|
+{rows}
+
+## 최근 백업 기록 (전체는 [HISTORY.md](HISTORY.md))
+{recent}
+
+## 파일 구성
+- `schema.sql` — 표·인덱스 정의
+- `<표>.jsonl` — 표마다 한 파일, 행 하나가 한 줄(JSON), 기본키 순 정렬. 같은 DB 면 항상 같은 내용이라 git 에는 **바뀐 줄만** 기록됩니다.
+- `HISTORY.md` — 백업할 때마다 한 줄 추가(언제, 몇 행, 무엇이 바뀌었는지)
+
+## 언제 갱신되나
+매일 01:00 cron(`run_skill.sh --agy`)이 끝날 때 `dbbackup.py sync` 가 덤프 → 이 README·HISTORY 갱신 → commit → push 를 합니다.
+push 가 실패하면(네트워크 등) 그 commit 은 로컬에 남고 다음 실행 때 함께 push 됩니다. 수동 실행: 프로젝트에서 `make backup-push`.
+
+## 복구 방법
+```
+git clone <이 저장소> ~/yt-watcher-later-backup
+cd ~/code/yt-watcher-later
+uv run dbbackup.py restore ~/yt-watcher-later-backup /tmp/restored.db   # 새 파일로 복구(기존 파일은 덮어쓰지 않음)
+uv run dbbackup.py verify ~/yt-watcher-later-backup                     # 현재 DB 와 비교
+```
+복구본을 확인한 뒤 서비스(yt-opinion)와 cron 을 멈추고 `data/watchlater.db` 와 교체하세요.
+"""
+
+def sync(out=None):
+    """덤프 -> README/HISTORY 갱신 -> commit -> push. 어느 단계가 실패해도 예외 대신 메시지를 돌려준다(일일 실행을 막지 않음)."""
+    out = pathlib.Path(out or DEFAULT)
+    if not (out / ".git").exists(): return "백업 폴더가 git 저장소가 아니어서 commit/push 생략"
+    n = dump(out); now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st = _git(out, "status", "--porcelain", "--", "*.jsonl", "schema.sql").stdout.split("\n")
+    changed = sorted({ln[3:].rsplit(".jsonl", 1)[0] for ln in st if ln.strip().endswith((".jsonl", "schema.sql"))})
+    stat = _git(out, "diff", "--numstat", "HEAD", "--", "*.jsonl").stdout.split("\n")   # 줄 단위 변경량(추가/삭제)
+    add = sum(int(p[0]) for p in (l.split("\t") for l in stat if l) if p[0].isdigit()); dele = sum(int(p[1]) for p in (l.split("\t") for l in stat if l) if p[1].isdigit())
+    ch = (", ".join(changed) + f" (+{add}/-{dele}줄)") if changed else "변경 없음"
+    rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip() or "-"
+    hist = out / "HISTORY.md"
+    if not hist.exists(): hist.write_text("# 백업 기록\n\n| 시각 | 총 행 수 | 바뀐 표 |\n|---|---:|---|\n", encoding="utf-8")
+    with open(hist, "a", encoding="utf-8") as f: f.write(f"| {now} | {sum(n.values())} | {ch} |\n")
+    recent = "\n".join(hist.read_text(encoding="utf-8").splitlines()[-10:][::-1])
+    (out / "README.md").write_text(README.format(now=now, size=pathlib.Path(D.DB_PATH).stat().st_size / 1e6, rev=rev, total=sum(n.values()), ntab=len(n), changed=ch,
+        rows="\n".join(f"| `{t}` | {c} |" for t, c in sorted(n.items())), recent="| 시각 | 총 행 수 | 바뀐 표 |\n|---|---:|---|\n" + "\n".join(l for l in recent.splitlines() if l.startswith("| 20"))), encoding="utf-8")
+    _git(out, "add", "-A")
+    r = _git(out, "commit", "-q", "-m", f"DB 백업 {now}: {ch}")
+    if r.returncode: return f"commit 실패: {(r.stderr or r.stdout).strip()[:200]}"
+    msg = f"commit 완료 ({ch})"
+    try: p = _git(out, "push", timeout=600)
+    except subprocess.TimeoutExpired: return msg + " / push 시간 초과(다음 실행에서 재시도)"
+    return msg + (" / push 완료" if p.returncode == 0 else f" / push 실패(다음 실행에서 재시도): {(p.stderr or p.stdout).strip()[-200:]}")
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("dump", "restore", "verify"): raise SystemExit(__doc__)
+    if not a or a[0] not in ("dump", "restore", "verify", "sync"): raise SystemExit(__doc__)
     if a[0] == "dump":
         n = dump(a[1] if len(a) > 1 else None); print(f"백업 완료 → {a[1] if len(a) > 1 else DEFAULT}  ({len(n)}개 표, {sum(n.values())}행)")
+    elif a[0] == "sync": print("DB 백업:", sync(a[1] if len(a) > 1 else None))
     elif a[0] == "restore":
         if len(a) < 3: raise SystemExit("사용: restore 백업폴더 새DB경로")
         n = restore(a[1], a[2]); print(f"복구 완료 → {a[2]}  ({len(n)}개 표, {sum(n.values())}행)")

@@ -38,4 +38,6 @@ for i in $(seq 1 "$ROUNDS"); do
   break                                    # all_done 또는 stalled(진전 없음: 사용량 한도 등)
 done
 [ "$FINISH" = 1 ] && uv run work.py finish
+# DB 백업: 덤프 → README/HISTORY 갱신 → ~/yt-watcher-later-backup 에 commit·push (실패해도 실행 결과에는 영향 없음)
+[ "$FINISH" = 1 ] && { uv run dbbackup.py sync || echo "DB 백업 sync 실패"; }
 echo "===== $(date '+%F %T') 종료 ====="
