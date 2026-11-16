@@ -24,6 +24,25 @@ def save_mine(con, vid, text):
     con.commit()
     return True, "저장했습니다. AI 의견은 다음 새벽 실행에서 달립니다"
 
+# ── 액션(직접 해볼 것) ────────────────────────────────────────────
+def set_action(con, vid, on):
+    if not con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone(): return False, "알 수 없는 영상입니다"
+    con.execute("INSERT INTO actions(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
+                (vid, 1 if on else 0, D.now()))
+    con.commit()
+    return True, "직접 해볼 것으로 표시했습니다" if on else "표시를 해제했습니다 (남긴 의견은 그대로 보관됩니다)"
+
+def save_action_comment(con, vid, text):
+    text = (text or "").strip()
+    if len(text) > MAX_LEN: return False, f"{MAX_LEN}자까지 저장할 수 있습니다"
+    if not con.execute("SELECT 1 FROM actions WHERE video_id=? AND on_flag=1", (vid,)).fetchone(): return False, "액션으로 표시된 영상이 아닙니다"
+    con.execute("UPDATE actions SET comment=?, comment_at=? WHERE video_id=?", (text, D.now(), vid))
+    con.commit()
+    return True, "저장했습니다"
+
+def actions_json(con):
+    return {r["video_id"]: {"on": bool(r["on_flag"]), "comment": r["comment"] or ""} for r in con.execute("SELECT * FROM actions")}
+
 def pending(con):
     """내 의견은 있고 AI 의견이 없는 영상."""
     return con.execute("""SELECT o.video_id, o.my_opinion, v.title, v.one_liner, v.summary, v.lessons, v.channel FROM opinions o JOIN videos v ON v.id=o.video_id
@@ -73,9 +92,17 @@ fetch(API+'opinions').then(function(r){return r.json()}).then(function(all){   /
  document.querySelectorAll('.op').forEach(function(box){var d=all[box.getAttribute('data-vid')];if(!d)return;
   if(d.ai){lock(box,d)}else{var ta=box.querySelector('textarea');if(ta&&document.activeElement!==ta&&!ta.dataset.dirty)ta.value=d.my}});}).catch(function(){});
 document.querySelectorAll('.op textarea').forEach(function(t){t.addEventListener('input',function(){t.dataset.dirty=1})});
+
+function post(path,body,cb){var t=tok();if(!t){t=prompt('저장용 비밀 토큰을 입력하세요 (한 번만 입력하면 이 브라우저에 기억됩니다)')||'';if(!t)return;try{localStorage.setItem(TK,t)}catch(x){}}
+ fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json','X-Token':t},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return[r.status,j]})}).then(function(p){
+  if(p[0]==401){try{localStorage.removeItem(TK)}catch(x){}cb(false,'토큰이 맞지 않습니다. 다시 눌러 입력하세요');return}cb(p[1].ok,p[1].message,p[1])}).catch(function(){cb(false,'저장 서버에 연결하지 못했습니다')})}
+function paint(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'🎯 직접 해볼 것 (표시됨)':'🎯 직접 해보기'}
+document.querySelectorAll('.act-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.act-msg');m.textContent='저장 중…';
+ post('action',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paint(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
+fetch(API+'actions').then(function(r){return r.json()}).then(function(all){document.querySelectorAll('.act-btn').forEach(function(b){var d=all[b.getAttribute('data-vid')];paint(b,!!(d&&d.on))})}).catch(function(){});
 })();</script>"""
 
-OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}</style>"
+OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}</style>"
 
 def box(con, vid):
     """영상 카드 맨 아래: 나의 의견(AI 의견 전까지는 항상 편집 가능) + 있으면 AI 의견."""
@@ -87,7 +114,12 @@ def box(con, vid):
     else:
         h += f"<textarea placeholder='이 영상에 대한 내 생각을 적고 저장을 누르세요 (AI 의견은 다음 새벽에 달립니다)'>{e(my)}</textarea><button type=button class=op-save>저장</button> <span class='op-msg meta'></span>"
         if my: h += "<div class=meta>AI 의견 대기 중 — 다음 새벽 실행에서 달립니다. 그 전까지는 수정할 수 있습니다.</div>"
-    return h + "</div>"
+    h += "</div>"
+    a = con.execute("SELECT on_flag FROM actions WHERE video_id=?", (vid,)).fetchone()
+    on = bool(a and a["on_flag"])
+    return h + (f"<div class=act-row><button type=button class='act-btn{' on' if on else ''}' data-vid='{e(vid)}' aria-pressed={'true' if on else 'false'}>"
+                f"{'🎯 직접 해볼 것 (표시됨)' if on else '🎯 직접 해보기'}</button> <span class='act-msg meta'></span>"
+                f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a></div>")
 
 LIST_CSS = """<style>
 .bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);padding:10px 0;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}

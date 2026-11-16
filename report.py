@@ -163,6 +163,7 @@ def how_block():
              ("stats.html","📈 시청 성향","많이 보는 채널·인물"),
              ("stats_channels.html","📺 모든 채널","stats 에서 연결"),
              ("opinions.html","💬 나와 AI 의견","내가 남긴 의견과 AI 의견"),
+             ("actions.html","🎯 액션 (직접 해볼 것)","직접 해봐야 할 영상과 해본 의견"),
              ("highlights.html","⭐ 인상 깊은 영상","왼쪽 목록·오른쪽 상세"),
              ("browse.html","🗂️ 날짜·주제별 보기","업로드일 최신순, 주제·기간·페이지 크기 선택"),
              ("watchlater.json","🧾 전체 데이터","JSON")]
@@ -185,7 +186,7 @@ def build_all(con):
     last = con.execute("SELECT max(checked_at) FROM checks WHERE checked_at IS NOT NULL").fetchone()[0]
     yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall() if last else []
     late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta>미확인 항목 {pend}개 · <a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += how_block()
     body += backlog_block(con)
     if yday: body += f"<section class=card><h3>✅ 어제 확인한 항목 ({len(yday)})</h3><p class=meta>확인일이 어제까지인 항목을 {e(last[:10])} 새벽 실행에서 AI가 판정한 결과입니다. 오늘 날짜 항목은 내일 새벽에 확인합니다.</p>" + checks_table(yday, True) + "</section>"
@@ -198,4 +199,5 @@ def build_all(con):
     import highlight; highlight.build(con)
     import browse; browse.build(con)
     import opinions; opinions.build(con)
+    import actions; actions.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)

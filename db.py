@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS indicator_values(
 CREATE TABLE IF NOT EXISTS macro_daily(date TEXT PRIMARY KEY, phase_index INTEGER, phase TEXT, reason TEXT);
 CREATE TABLE IF NOT EXISTS dup_seen(video_id TEXT, owner TEXT, playlist_name TEXT, seen_at TEXT, PRIMARY KEY(video_id, owner, playlist_name));  -- 이미 분석된 영상이 다른 재생목록에도 저장돼 있음을 기록(분석은 건너뜀)
 CREATE TABLE IF NOT EXISTS opinions(video_id TEXT PRIMARY KEY, my_opinion TEXT, my_at TEXT, ai_reply TEXT, ai_llm TEXT, ai_at TEXT);  -- 나의 의견(리포트 저장 버튼) / AI 의견(cron 이 채움)
+CREATE TABLE IF NOT EXISTS actions(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT, comment TEXT, comment_at TEXT);  -- '직접 해봐야 할 것' 표시(리포트 액션 버튼) + 해보고 남긴 의견
 CREATE TABLE IF NOT EXISTS backlog(video_id TEXT PRIMARY KEY, title TEXT, owner TEXT, playlist_name TEXT, pos INTEGER, seen_at TEXT);  -- 재생목록에 있으나 아직 분석 안 된 영상(collect 때 갱신)
 CREATE TABLE IF NOT EXISTS analysis_runs(      -- 분석 실행 기록: 어떤 도구(engine)·모델이 이 영상을 어떻게 분석했는가 (여러 도구의 결과를 나란히 보관)
   id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT, engine TEXT, model TEXT, run_at TEXT, source TEXT,

@@ -1,5 +1,5 @@
 """의견 저장 서버(로컬 127.0.0.1:8650). nginx 가 /yt_watch_later/api/ 를 여기로 프록시한다.
- POST /save {id,text}  (헤더 X-Token 필요)   GET /opinions -> 전체 의견 JSON
+ POST /save {id,text} · /action {id,on} · /action_comment {id,text}  (헤더 X-Token 필요)   GET /opinions, /actions -> JSON
 토큰: ~/.config/yt-watcher-later/token (프로젝트 밖, git 에 올리지 않음).   실행: uv run opinion_server.py"""
 import hmac, json, os, pathlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,26 +18,33 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
 
     def do_GET(self):
-        if self.path.split("?")[0] != "/opinions": return self._send(404, {"ok": False, "message": "not found"})
+        p = self.path.split("?")[0]
+        if p not in ("/opinions", "/actions"): return self._send(404, {"ok": False, "message": "not found"})
         con = D.connect()
-        try: self._send(200, O.all_json(con))
+        try: self._send(200, O.all_json(con) if p == "/opinions" else O.actions_json(con))
         finally: con.close()
 
     def do_POST(self):
-        if self.path.split("?")[0] != "/save": return self._send(404, {"ok": False, "message": "not found"})
+        path = self.path.split("?")[0]
+        if path not in ("/save", "/action", "/action_comment"): return self._send(404, {"ok": False, "message": "not found"})
         if not hmac.compare_digest(self.headers.get("X-Token", ""), token()): return self._send(401, {"ok": False, "message": "토큰이 맞지 않습니다"})
         try:
             n = int(self.headers.get("Content-Length", "0"))
             if n > 20000: return self._send(413, {"ok": False, "message": "너무 깁니다"})
             d = json.loads(self.rfile.read(n) or b"{}")
-            vid, text = str(d["id"]), str(d.get("text", ""))
+            vid, text, on = str(d["id"]), str(d.get("text", "")), bool(d.get("on", True))
         except Exception: return self._send(400, {"ok": False, "message": "요청 형식이 잘못됐습니다"})
         con = D.connect()
         try:
-            ok, msg = O.save_mine(con, vid, text)
+            if path == "/save": ok, msg = O.save_mine(con, vid, text)
+            elif path == "/action": ok, msg = O.set_action(con, vid, on)
+            else: ok, msg = O.save_action_comment(con, vid, text)
             if ok:
-                try: O.build(con)          # '나와 AI 의견' 페이지 즉시 갱신
-                except Exception as ex: print("opinions.html 갱신 실패:", ex, flush=True)
+                try:                       # 해당 페이지 즉시 갱신
+                    if path == "/save": O.build(con)
+                    else:
+                        import actions; actions.build(con)
+                except Exception as ex: print("페이지 갱신 실패:", ex, flush=True)
         finally: con.close()
         self._send(200 if ok else 409, {"ok": ok, "message": msg})
 
