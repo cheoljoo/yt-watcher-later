@@ -102,3 +102,8 @@ Apache License 2.0 — [LICENSE](LICENSE) 참고.
 
 ## DB 백업/복구
 `uv run dbbackup.py dump` 는 DB 를 `~/yt-watcher-later-backup`(또는 `$YT_BACKUP_DIR`)에 `schema.sql` + 표별 `<표>.jsonl`(행당 한 줄, 기본키 순)로 저장한다. 바뀐 행만 git diff 에 나타난다. 폴더가 있으면 `work.py finish` 가 덤프하고, `run_skill.sh` 끝에서 `dbbackup.py sync` 가 README.md·HISTORY.md(백업 시각·변경 내역) 갱신 + 백업 저장소 commit·push 까지 자동으로 한다(`make backup-push` 로 수동 실행). 복구: `uv run dbbackup.py restore 백업폴더 새DB경로`, 비교: `verify`. 개인 의견·자막이 들어 있으므로 공개 저장소가 아닌 별도 비공개 저장소에 둘 것.
+
+## 자막을 못 받을 때 (YouTube 429)
+- 영상 정보(제목·설명·댓글)는 받았는데 자막 요청만 429 로 막히면 영상을 실패 처리하지 않는다. 제목·설명·댓글만으로 분석하고 `transcript_status='meta_only'` 로 표시한다(카드에 📝 '자막을 받지 못해 … 내용 정확도가 낮습니다').
+- 다음 날부터 자막만 다시 받아 보고(최대 5회), 받으면 그 영상을 다시 분석해 `ok` 로 바꾼다. 5회 실패하면 `gave_up`.
+- 자막 429 도 병렬 수 조절 신호로 쓴다. agy 로 영상 내용을 기술시켜 자막 대신 쓰는 방식은 시험 결과 영상 본문을 읽지 못해 채택하지 않았다.

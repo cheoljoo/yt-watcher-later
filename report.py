@@ -71,7 +71,8 @@ def card(con, v):
         h += f"<div class=meta>♻️ {e(d['owner'])} 님의 {e(d['playlist_name'] or '')} 에도 저장됨 (발견 {e((d['seen_at'] or '')[:10])}) — 이미 분석해서 다시 하지 않았습니다</div>"
     ts = v["transcript_status"]
     if ts == "pending_retry": h += f"<div class=meta>⚠ 스크립트 없음(생방송) — {e(v['transcript_retry_at'])} 재시도 예정. 현재 분석은 제목·설명·댓글 기반</div>"
-    elif ts == "gave_up": h += "<div class=meta>⚠ 스크립트 확보 실패(재시도 후 포기). 분석은 제목·설명·댓글 기반</div>"
+    elif ts == "meta_only": h += f"<div class=meta style='color:#e8590c'>📝 <b>자막을 받지 못해(YouTube 429) 제목·설명·댓글만으로 분석했습니다 — 내용 정확도가 낮습니다.</b> 자막은 {e(v['transcript_retry_at'] or '')} 이후 다시 받아 보고, 받으면 다시 분석합니다 (시도 {v['transcript_attempts'] or 1}/5)</div>"
+    elif ts == "gave_up": h += "<div class=meta style='color:#e8590c'>📝 <b>자막 확보 실패(재시도 후 포기)</b> — 분석은 제목·설명·댓글 기반이라 내용 정확도가 낮습니다</div>"
     elif ts == "none": h += "<div class=meta>⚠ 스크립트 없음. 분석은 제목·설명·댓글 기반</div>"
     h += f"<div><span class='chip cat'>{CAT_ICON.get(v['category'], '📌')} {e(v['category'])}</span><span class=chip>{e(v['subtag'])}</span>" + "".join(f"<span class=chip>{e(t)}</span>" for t in tags) + "</div>"
     h += f"<p><b>{e(v['one_liner'])}</b></p>" + "<ul>" + "".join(f"<li>{e(l[2:])}</li>" for l in v["summary"].splitlines() if l.startswith("- ")) + "</ul>"

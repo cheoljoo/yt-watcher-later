@@ -28,16 +28,22 @@ def collect(video_id, cfg, data_dir="data", log=None):
     info_p, tr_p = d / f"{video_id}.info.json", d / "transcript.txt"
     langs = cfg["langs"]
     vtt = lambda l: d / f"{video_id}.{l}.vtt"
+    sub_429 = False                                      # 영상 정보는 받았는데 자막 요청이 YouTube 429 로 막힘
     if not info_p.exists():
-        r = _ytdlp(cfg, d, video_id, ["--write-info-json", "--write-comments",
-                   "--extractor-args", f"youtube:max_comments={cfg['max_comments']},all,0,0;comment_sort=top;lang=ko",
-                   "--write-subs", "--write-auto-subs", "--sub-langs", langs[0], "--sub-format", "vtt"], log=log)
-        if not info_p.exists():
+        try:
+            r = _ytdlp(cfg, d, video_id, ["--write-info-json", "--write-comments",
+                       "--extractor-args", f"youtube:max_comments={cfg['max_comments']},all,0,0;comment_sort=top;lang=ko",
+                       "--write-subs", "--write-auto-subs", "--sub-langs", langs[0], "--sub-format", "vtt"], log=log)
+        except RateLimited:
+            if not info_p.exists(): raise                # 영상 정보조차 못 받음 -> 실패
+            sub_429 = True; r = None                     # 정보는 받음 -> 자막만 나중에 다시
+        if r is not None and not info_p.exists():
             errs = [l for l in r.stderr.splitlines() if "ERROR" in l] or r.stderr.splitlines()[-3:]
             raise RuntimeError(f"yt-dlp 실패(code {r.returncode}): " + " | ".join(errs)[-400:])
-    for l in langs[1:]:                                  # 우선 언어 자막이 없을 때만 다음 언어 요청
-        if not any(vtt(x).exists() for x in langs):
-            _ytdlp(cfg, d, video_id, ["--write-subs", "--write-auto-subs", "--sub-langs", l, "--sub-format", "vtt"], log=log)
+    for l in langs[1:]:                                  # 우선 언어 자막이 없을 때만 다음 언어 요청(이미 429 면 더 두드리지 않는다)
+        if not sub_429 and not any(vtt(x).exists() for x in langs):
+            try: _ytdlp(cfg, d, video_id, ["--write-subs", "--write-auto-subs", "--sub-langs", l, "--sub-format", "vtt"], retries=2, log=log)
+            except RateLimited: sub_429 = True
     info = json.loads(info_p.read_text(encoding="utf-8"))
     lang = text = None
     for l in langs:
@@ -45,7 +51,7 @@ def collect(video_id, cfg, data_dir="data", log=None):
             lang, text = l, vtt_to_text(str(vtt(l))); tr_p.write_text(text, encoding="utf-8"); break
     ud = info.get("upload_date") or ""
     return {
-        "info": info, "transcript": text, "lang": lang,
+        "info": info, "transcript": text, "lang": lang, "sub_429": bool(sub_429 and not text),
         "meta": {
             "upload_date": f"{ud[:4]}-{ud[4:6]}-{ud[6:]}" if len(ud) == 8 else None,
             "channel": info.get("channel"), "channel_id": info.get("channel_id"),

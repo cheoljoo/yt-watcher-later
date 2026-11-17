@@ -21,7 +21,9 @@ def collect_many(videos, cfg):
         limited = 0
         for v, col, err, log in results:
             lines += log
-            if err is None: ok[v["id"]] = col; lines.append(f"[{v['id']}] 수집 성공 (자막 {col['lang'] or '없음'})")
+            if err is None:
+                ok[v["id"]] = col; lines.append(f"[{v['id']}] 수집 성공 (자막 {col['lang'] or ('없음 — YouTube 429 로 못 받음, 나중에 재시도' if col.get('sub_429') else '없음')})")
+                limited += bool(col.get("sub_429"))      # 자막 429 도 속도 조절 신호
             else:
                 bad[v["id"]] = str(err); lines.append(f"[{v['id']}] 수집 실패: {str(err)[:200]}")
                 limited += isinstance(err, RateLimited)

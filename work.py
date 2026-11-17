@@ -11,7 +11,7 @@
 
 작업 단계 순서: video(영상 분석) -> enrich(지표 설명) -> map(시세 출처) -> meaning(값의 의미) -> phase(매크로 위치) -> check(확인 항목 판정)
 """
-import argparse, hashlib, json, pathlib, shutil, sys
+import argparse, datetime, hashlib, json, pathlib, shutil, sys
 from jsonschema import Draft202012Validator
 import db as D
 import main as M
@@ -57,11 +57,12 @@ def chunks(xs, n): return [xs[i:i + n] for i in range(0, len(xs), n)]
 def gen_video(con, st):
     done = {r[0] for r in con.execute("SELECT id FROM videos WHERE status='done'")}
     voc, today = M.vocab(con), D.today()
+    reanalyze = {r[0] for r in con.execute("SELECT id FROM videos WHERE transcript_status IN ('pending_retry','meta_only')")}
     allowed = int(os.environ.get("MAX_ANALYZE") or cfg.get("max_analyze", 30)) - len(tried(st, "video"))      # 이번 실행(collect~finish)에서 더 분석할 수 있는 수
     cols = [json.loads(f.read_text(encoding="utf-8")) | {"f": f} for f in (COL.glob("*.json") if COL.exists() else [])]
     for d in sorted(cols, key=lambda d: d["v"]["pos"]):                 # 재생목록 앞쪽(최근 추가)부터
         v, col = d["v"], d["col"]
-        if v["id"] in done: d["f"].unlink(); continue
+        if v["id"] in done and not (col.get("transcript") and v["id"] in reanalyze): d["f"].unlink(); continue   # 자막을 뒤늦게 받은 meta_only 영상만 다시 분석
         if v["id"] in tried(st, "video"): continue
         if allowed <= 0: break
         allowed -= 1
@@ -127,11 +128,12 @@ def cmd_collect(a):
         shutil.rmtree(d, ignore_errors=True)
     COL.mkdir(parents=True, exist_ok=True); write_schemas()
     st["attempted"] = {}; st["round_submitted"] = 0
-    rows = con.execute("SELECT id,url,title,wl_position,owner,playlist_name FROM videos WHERE transcript_status='pending_retry' AND transcript_retry_at<=?", (D.today(),)).fetchall()
+    rows = con.execute("SELECT id,url,title,wl_position,owner,playlist_name FROM videos WHERE transcript_status IN ('pending_retry','meta_only') AND transcript_retry_at<=?", (D.today(),)).fetchall()
     retry = [{"id": r["id"], "url": r["url"], "title": r["title"], "pos": r["wl_position"], "owner": r["owner"] or "cheoljoo", "playlist": r["playlist_name"]} for r in rows]
+    live_retry = {r[0] for r in con.execute("SELECT id FROM videos WHERE transcript_status='pending_retry'")}
     for v in retry:
         for f in (M.DATA / v["id"]).glob(f"{v['id']}.*.vtt"): f.unlink()
-        (M.DATA / v["id"] / f"{v['id']}.info.json").unlink(missing_ok=True)
+        if v["id"] in live_retry: (M.DATA / v["id"] / f"{v['id']}.info.json").unlink(missing_ok=True)   # 생방송은 정보도 다시, 자막 429 건은 받아 둔 정보 재사용
     vids = M.load_playlists()
     done = {r[0] for r in con.execute("SELECT id FROM videos WHERE status='done'")}
     ids = {v["id"] for v in retry}
@@ -144,11 +146,19 @@ def cmd_collect(a):
     print(f"전체 {len(vids)}개 중 미분석 {len(backlog)}개, 이번에 수집할 것 {len(targets)}개 (재시도 {len(retry)}개 포함) — Claude 분석은 최대 {cfg.get('max_analyze', 30)}개", flush=True)
     if targets:
         got, bad, lines = collect_many(targets, cfg)
-        for vid, msg in bad.items(): M.mark_error(con, next(v for v in targets if v["id"] == vid), msg)
+        for vid, msg in bad.items():
+            if vid not in ids: M.mark_error(con, next(v for v in targets if v["id"] == vid), msg)   # 이미 분석된 재시도 대상은 error 로 덮지 않는다
+        for v in retry:                                                  # 자막 재시도했는데 또 못 받음 -> 횟수 +1, 상한이면 포기
+            if not (got.get(v["id"]) or {}).get("transcript"):
+                con.execute("""UPDATE videos SET transcript_attempts=COALESCE(transcript_attempts,0)+1,
+                    transcript_status=CASE WHEN transcript_status='meta_only' AND COALESCE(transcript_attempts,0)+1>=? THEN 'gave_up' ELSE transcript_status END,
+                    transcript_retry_at=CASE WHEN transcript_status='meta_only' AND COALESCE(transcript_attempts,0)+1>=? THEN NULL ELSE ? END WHERE id=?""",
+                    (M.MAX_SUB_TRY, M.MAX_SUB_TRY, (datetime.date.today() + datetime.timedelta(days=1)).isoformat(), v["id"]))
+        con.commit()
         for v in targets:
             if v["id"] in got:
                 c = got[v["id"]]
-                (COL / f"{v['id']}.json").write_text(json.dumps({"v": v, "col": {"meta": c["meta"], "lang": c["lang"], "transcript": c["transcript"]}}, ensure_ascii=False), encoding="utf-8")
+                (COL / f"{v['id']}.json").write_text(json.dumps({"v": v, "col": {"meta": c["meta"], "lang": c["lang"], "transcript": c["transcript"], "sub_429": c.get("sub_429", False)}}, ensure_ascii=False), encoding="utf-8")
         print(f"수집 성공 {len(got)} / 실패 {len(bad)} — 로그: {write_log(lines)}", flush=True)
     con.execute("UPDATE videos SET transcript_status='gave_up', transcript_retry_at=NULL WHERE transcript_status='pending_retry' AND transcript_attempts>=2 AND transcript_retry_at<=?", (D.today(),))
     con.commit(); save_state(st)

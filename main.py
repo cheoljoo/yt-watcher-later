@@ -12,6 +12,7 @@ cfg = tomllib.loads(pathlib.Path("config.toml").read_text(encoding="utf-8"))
 DATA = pathlib.Path("data")
 LIVE = {"is_live", "was_live", "is_upcoming", "post_live"}   # 생방송 출신: 자막이 며칠 뒤에 생길 수 있음
 RETRY_DAYS = 1 * 7
+MAX_SUB_TRY = 5            # 자막 429 로 메타데이터만 분석한 영상의 자막 재시도 상한(분석 1회 + 재시도)
 
 def vocab(con):
     return [r[0] for r in con.execute("SELECT tag FROM tags GROUP BY tag ORDER BY count(*) DESC LIMIT 60")]
@@ -41,6 +42,8 @@ def store(con, v, col, res, model, engine="claude"):
     old = con.execute("SELECT transcript_attempts FROM videos WHERE id=?", (vid,)).fetchone()
     att = (old["transcript_attempts"] or 0) + 1
     if col["transcript"]: st, ra = "ok", None
+    elif col.get("sub_429"):                                   # 자막을 YouTube 429 로 못 받음: 메타데이터만으로 분석, 내일부터 자막 재시도
+        st, ra = ("meta_only", (datetime.date.today() + datetime.timedelta(days=1)).isoformat()) if att < MAX_SUB_TRY else ("gave_up", None)
     elif m["live_status"] in LIVE and att < 2:
         st, ra = "pending_retry", (datetime.date.today() + datetime.timedelta(days=RETRY_DAYS)).isoformat()
     elif m["live_status"] in LIVE: st, ra = "gave_up", None
