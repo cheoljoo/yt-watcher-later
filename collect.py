@@ -5,6 +5,17 @@ from vtt_to_text import vtt_to_text
 
 class RateLimited(RuntimeError): pass
 
+def _api_transcript(video_id, langs, log=None):
+    """폴백: yt-dlp 가 자막을 못 받았을 때만 youtube-transcript-api 로 한 번 더 시도. (언어, 텍스트) 또는 (None, None)."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        t = YouTubeTranscriptApi().fetch(video_id, languages=list(langs))
+        text = "\n".join(x.text.replace("\n", " ").strip() for x in t.snippets if x.text.strip())
+        return (t.language_code, text) if text else (None, None)
+    except Exception as e:
+        if log is not None: log.append(f"[{video_id}] youtube-transcript-api 폴백 실패: {type(e).__name__}")
+        return None, None
+
 def _run(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     return r, ("429" in r.stderr or "Too Many Requests" in r.stderr)
@@ -49,6 +60,12 @@ def collect(video_id, cfg, data_dir="data", log=None):
     for l in langs:
         if vtt(l).exists():
             lang, text = l, vtt_to_text(str(vtt(l))); tr_p.write_text(text, encoding="utf-8"); break
+    if not text and info.get("live_status") not in ("is_live", "is_upcoming"):   # 폴백 (진행 중인 라이브는 자막이 아직 없다)
+        l, t = _api_transcript(video_id, langs, log)
+        if t:
+            lang, text, sub_429 = f"{l} (transcript-api)", t, False   # 출처 구분: DB transcript_lang 에 표시
+            tr_p.write_text(text, encoding="utf-8")
+            if log is not None: log.append(f"[{video_id}] yt-dlp 자막 실패 → youtube-transcript-api 로 받음")
     ud = info.get("upload_date") or ""
     return {
         "info": info, "transcript": text, "lang": lang, "sub_429": bool(sub_429 and not text),

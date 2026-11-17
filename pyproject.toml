@@ -5,4 +5,5 @@ description = "YouTube 재생목록 영상을 매일 수집해 스크립트 저�
 requires-python = ">=3.13"
 dependencies = [
     "jsonschema>=4.26.0",
+    "youtube-transcript-api>=1.2.5",
 ]
