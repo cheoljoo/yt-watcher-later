@@ -87,6 +87,7 @@ def submit(vid, file):
                    engine=excluded.engine, model=excluded.model, analysis_json=excluded.analysis_json, title=excluded.title""",
                 (vid, m["url"], m["title"], m["channel"], m["channel_url"], m["upload_date"], m["duration_sec"], m["view_count"], m["note"],
                  D.now(), os.environ.get("YT_ENGINE") or "claude", model, json.dumps(data, ensure_ascii=False)))
+    con.execute("INSERT INTO stars(video_id,on_flag,on_at) VALUES(?,1,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=1, on_at=excluded.on_at", (vid, D.now()))   # 새 분석은 자동으로 별표
     con.commit(); build(con)
     print(f"OK {vid} 저장 — reports/highlights.html")
 
@@ -117,6 +118,21 @@ def card(r, n=None, earlier=None):
     if a.get("links"): h += "<h2>🔗 링크</h2><ul>" + "".join(f"<li><a href='{e(x['url'])}'>{e(x['url'])}</a> <span class=meta>{e(x['context'])}</span></li>" for x in a["links"]) + "</ul>"
     return h + "</section>"
 
+def basic_card(con, vid, n=None):
+    """별표만 달고 상세 분석(highlights)은 아직 없는 영상 — 일일 리포트에 있는 요약 정보만 보여준다."""
+    v = con.execute("SELECT * FROM videos WHERE id=?", (vid,)).fetchone()
+    if not v: return ""
+    h = f"<section class=card id='h-{e(vid)}'><h3>{('#' + str(n) + ' ') if n else ''}⭐ <a href='{e(v['url'] or 'https://www.youtube.com/watch?v=' + vid)}'>{e(v['title'] or vid)}</a></h3>"
+    h += f"<div class=meta>📺 <a href='{e(v['channel_url'] or '#')}'>{e(v['channel'] or '')}</a> · 업로드 {e(v['upload_date'] or '-')}</div>"
+    if v["one_liner"]: h += f"<p><b>{e(v['one_liner'])}</b></p>"
+    try: pts = json.loads(v["summary"] or "[]")
+    except Exception: pts = []
+    if pts: h += "<h2>📌 일일 리포트 요약</h2>" + ul(pts)
+    ea = _earlier(con, vid)
+    if ea: h += f"<p class=meta>일일 리포트(처리일 {e(ea[1])}) — <a href='{e(ea[0])}.html#v-{e(vid)}'>전체 요약 보기</a></p>"
+    h += f"<p class=meta>📝 상세 분석은 아직 없습니다. 만들려면 Claude/agy 에서 <code>/yt-highlight https://www.youtube.com/watch?v={e(vid)}</code></p>"
+    return h + "</section>"
+
 def _earlier(con, vid):
     x = con.execute("SELECT COALESCE(run_id,processed_date) k, processed_date d FROM videos WHERE id=? AND status='done'", (vid,)).fetchone()
     return (x["k"], x["d"]) if x and x["k"] else None
@@ -144,11 +160,15 @@ window.addEventListener('hashchange',show);show()})();
 def build(con=None):
     import report as R
     con = con or D.connect(); R.OUT.mkdir(exist_ok=True)
-    rows = con.execute("SELECT * FROM highlights ORDER BY added_at DESC").fetchall()
-    nav = "".join(f"<a href='#h-{e(r['video_id'])}'>{e(r['title'])}<small>{e(r['channel'] or '')} · 담은 날 {e((r['added_at'] or '')[:10])}</small></a>" for r in rows)
-    body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>직접 고른 영상을 아주 상세히 정리한 모음 · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>🏠 홈</a> · "
+    # 별표(stars.on_flag=1)가 달린 영상만 보인다. 상세 분석(highlights)이 있으면 전체 카드, 없으면 요약 카드
+    rows = con.execute("""SELECT s.video_id, s.on_at, h.url, h.title, h.channel, h.channel_url, h.upload_date, h.duration_sec, h.view_count, h.note,
+                          h.added_at, h.engine, h.model, h.analysis_json, v.title v_title, v.channel v_channel
+                          FROM stars s LEFT JOIN highlights h ON h.video_id=s.video_id LEFT JOIN videos v ON v.id=s.video_id
+                          WHERE s.on_flag=1 ORDER BY s.on_at DESC""").fetchall()
+    nav = "".join(f"<a href='#h-{e(r['video_id'])}'>{e(r['title'] or r['v_title'] or r['video_id'])}<small>{e(r['channel'] or r['v_channel'] or '')} · 별표 {e((r['on_at'] or '')[:10])}{'' if r['analysis_json'] else ' · 상세 분석 없음'}</small></a>" for r in rows)
+    body = (f"<style>{LAYOUT_CSS}</style><h1>⭐ 제일 인상 깊었던 영상</h1><p class=meta>리포트 카드의 ⭐ 버튼으로 고른 영상 모음(상세 분석이 있으면 아주 상세히) · {len(rows)}개 · 왼쪽에서 고르면 오른쪽에 내용이 나옵니다 · <a href='index.html'>🏠 홈</a> · "
             f"추가: Claude/agy 에서 <code>/yt-highlight URL</code></p>")
-    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join(card(r, i, _earlier(con, r['video_id'])) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
+    if rows: body += f"<div class=hl><nav class=hl-nav>{nav}</nav><div class=hl-body>{''.join((card(r, i, _earlier(con, r['video_id'])) if r['analysis_json'] else basic_card(con, r['video_id'], i)) for i, r in enumerate(rows, 1))}</div></div>{LAYOUT_JS}"
     else: body += "<p class=meta>아직 없습니다.</p>"
     (R.OUT / "highlights.html").write_text(R.page("인상 깊은 영상", body, "⭐"), encoding="utf-8")
 

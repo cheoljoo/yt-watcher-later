@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS highlights(          -- 제일 인상 깊은 영상 �
   video_id TEXT PRIMARY KEY, url TEXT, title TEXT, channel TEXT, channel_url TEXT, upload_date TEXT, duration_sec INTEGER, view_count INTEGER,
   note TEXT, added_at TEXT, engine TEXT, model TEXT, analysis_json TEXT
 );
+CREATE TABLE IF NOT EXISTS stars(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT);  -- '인상 깊은 영상' 별표(리포트 ⭐ 버튼). on_flag=1 인 영상이 highlights.html 에 보인다
 CREATE INDEX IF NOT EXISTS idx_runs_video ON analysis_runs(video_id);
 CREATE INDEX IF NOT EXISTS idx_checks_due ON checks(status, check_date);
 CREATE INDEX IF NOT EXISTS idx_videos_date ON videos(processed_date);

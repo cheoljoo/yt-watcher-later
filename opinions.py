@@ -43,6 +43,18 @@ def save_action_comment(con, vid, text):
 def actions_json(con):
     return {r["video_id"]: {"on": bool(r["on_flag"]), "comment": r["comment"] or ""} for r in con.execute("SELECT * FROM actions")}
 
+# ── 별표(인상 깊은 영상) ──────────────────────────────────────────
+def set_star(con, vid, on):
+    if not (con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone() or con.execute("SELECT 1 FROM highlights WHERE video_id=?", (vid,)).fetchone()):
+        return False, "알 수 없는 영상입니다"
+    con.execute("INSERT INTO stars(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
+                (vid, 1 if on else 0, D.now()))
+    con.commit()
+    return True, "별표를 달았습니다 — 인상 깊은 영상 페이지에 나옵니다" if on else "별표를 뗐습니다 (상세 분석이 있었다면 DB에 그대로 보관됩니다)"
+
+def stars_json(con):
+    return {r["video_id"]: bool(r["on_flag"]) for r in con.execute("SELECT * FROM stars")}
+
 def pending(con):
     """내 의견은 있고 AI 의견이 없는 영상."""
     return con.execute("""SELECT o.video_id, o.my_opinion, v.title, v.one_liner, v.summary, v.lessons, v.channel FROM opinions o JOIN videos v ON v.id=o.video_id
@@ -99,10 +111,14 @@ function post(path,body,cb){var t=tok();if(!t){t=prompt('저장용 비밀 토큰
 function paint(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'🎯 직접 해볼 것 (표시됨)':'🎯 직접 해보기'}
 document.querySelectorAll('.act-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.act-msg');m.textContent='저장 중…';
  post('action',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paint(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
+function paintS(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'⭐ 인상 깊은 영상 (별표됨)':'☆ 인상 깊은 영상'}
+document.querySelectorAll('.star-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.act-msg');m.textContent='저장 중…';
+ post('star',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paintS(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
+fetch(API+'stars').then(function(r){return r.json()}).then(function(all){document.querySelectorAll('.star-btn').forEach(function(b){paintS(b,!!all[b.getAttribute('data-vid')])})}).catch(function(){});
 fetch(API+'actions').then(function(r){return r.json()}).then(function(all){document.querySelectorAll('.act-btn').forEach(function(b){var d=all[b.getAttribute('data-vid')];paint(b,!!(d&&d.on))})}).catch(function(){});
 })();</script>"""
 
-OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}</style>"
+OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}.star-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer;margin-left:6px}.star-btn.on{background:#f5b301;border-color:#f5b301;color:#222;font-weight:600}</style>"
 
 def box(con, vid):
     """영상 카드 맨 아래: 나의 의견(AI 의견 전까지는 항상 편집 가능) + 있으면 AI 의견."""
@@ -117,9 +133,13 @@ def box(con, vid):
     h += "</div>"
     a = con.execute("SELECT on_flag FROM actions WHERE video_id=?", (vid,)).fetchone()
     on = bool(a and a["on_flag"])
+    st = con.execute("SELECT on_flag FROM stars WHERE video_id=?", (vid,)).fetchone()
+    son = bool(st and st["on_flag"])
     return h + (f"<div class=act-row><button type=button class='act-btn{' on' if on else ''}' data-vid='{e(vid)}' aria-pressed={'true' if on else 'false'}>"
-                f"{'🎯 직접 해볼 것 (표시됨)' if on else '🎯 직접 해보기'}</button> <span class='act-msg meta'></span>"
-                f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a></div>")
+                f"{'🎯 직접 해볼 것 (표시됨)' if on else '🎯 직접 해보기'}</button>"
+                f"<button type=button class='star-btn{' on' if son else ''}' data-vid='{e(vid)}' aria-pressed={'true' if son else 'false'}>"
+                f"{'⭐ 인상 깊은 영상 (별표됨)' if son else '☆ 인상 깊은 영상'}</button> <span class='act-msg meta'></span>"
+                f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a><a class=meta href='highlights.html' style='margin-left:8px'>인상 깊은 영상 ›</a></div>")
 
 LIST_CSS = """<style>
 .bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);padding:10px 0;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}

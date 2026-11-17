@@ -1,5 +1,5 @@
 """의견 저장 서버(로컬 127.0.0.1:8650). nginx 가 /yt_watch_later/api/ 를 여기로 프록시한다.
- POST /save {id,text} · /action {id,on} · /action_comment {id,text}  (헤더 X-Token 필요)   GET /opinions, /actions -> JSON
+ POST /save {id,text} · /action {id,on} · /action_comment {id,text} · /star {id,on}  (헤더 X-Token 필요)   GET /opinions, /actions, /stars -> JSON
 토큰: ~/.config/yt-watcher-later/token (프로젝트 밖, git 에 올리지 않음).   실행: uv run opinion_server.py"""
 import hmac, json, os, pathlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,14 +19,14 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?")[0]
-        if p not in ("/opinions", "/actions"): return self._send(404, {"ok": False, "message": "not found"})
+        if p not in ("/opinions", "/actions", "/stars"): return self._send(404, {"ok": False, "message": "not found"})
         con = D.connect()
-        try: self._send(200, O.all_json(con) if p == "/opinions" else O.actions_json(con))
+        try: self._send(200, {"/opinions": O.all_json, "/actions": O.actions_json, "/stars": O.stars_json}[p](con))
         finally: con.close()
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        if path not in ("/save", "/action", "/action_comment"): return self._send(404, {"ok": False, "message": "not found"})
+        if path not in ("/save", "/action", "/action_comment", "/star"): return self._send(404, {"ok": False, "message": "not found"})
         if not hmac.compare_digest(self.headers.get("X-Token", ""), token()): return self._send(401, {"ok": False, "message": "토큰이 맞지 않습니다"})
         try:
             n = int(self.headers.get("Content-Length", "0"))
@@ -38,10 +38,13 @@ class H(BaseHTTPRequestHandler):
         try:
             if path == "/save": ok, msg = O.save_mine(con, vid, text)
             elif path == "/action": ok, msg = O.set_action(con, vid, on)
+            elif path == "/star": ok, msg = O.set_star(con, vid, on)
             else: ok, msg = O.save_action_comment(con, vid, text)
             if ok:
                 try:                       # 해당 페이지 즉시 갱신
                     if path == "/save": O.build(con)
+                    elif path == "/star":
+                        import highlight; highlight.build(con)
                     else:
                         import actions; actions.build(con)
                 except Exception as ex: print("페이지 갱신 실패:", ex, flush=True)
