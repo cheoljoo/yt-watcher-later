@@ -72,6 +72,17 @@ def _rows(rows, done=None):
 
 SEL = "SELECT c.*, v.title, COALESCE(v.run_id, v.processed_date) AS processed_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id"
 
+def _count_table(con, only_pending):
+    """확인 항목 상태별 개수 표 (⏳ 대기 페이지는 대기·전체, ✅ 확인한 것 페이지는 판정별 개수)."""
+    n = dict(con.execute("SELECT status, count(*) FROM checks GROUP BY status").fetchall())
+    total = sum(n.values())
+    names = {"pending": "대기 중", "confirmed": "확인됨(예상대로)", "refuted": "틀림", "partial": "일부만 맞음", "unknown": "판단 불가"}
+    keys = ["pending"] if only_pending else [k for k in names if k != "pending" and n.get(k)]
+    rows = "".join(f"<tr><td>{ST_ICON.get(k, '')} {names[k]}<td align=right>{n.get(k, 0):,}개</tr>" for k in keys)
+    rows += f"<tr><td><b>전체 확인 항목</b><td align=right><b>{total:,}개</b></tr>"
+    if not only_pending: rows += f"<tr><td>확인한 것 합계<td align=right>{total - n.get('pending', 0):,}개</tr>"
+    return f"<section class=card><h3>🔢 개수</h3><table>{rows}</table></section>"
+
 def build_checks(con):
     today = D.today()
     pend = con.execute(SEL + " WHERE c.status='pending' ORDER BY c.check_date, c.id").fetchall()
@@ -79,12 +90,14 @@ def build_checks(con):
     body = f"<h1>⏳ 앞으로 확인할 것</h1><p class=meta>시간순(확인일 빠른 순) · 미확인 {len(pend)}개 · <a href='index.html'>🏠 홈</a> · <a href='checks_done.html'>확인한 것 ›</a> · <a href='indicators.html'>지표 ›</a></p>" + LEGEND
     if due: body += f"<section class='card due'><h3>⏰ 지금 확인할 시점이 된 것 ({len(due)})</h3>{_rows(due)}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (시간순)</h3>{_rows(pend)}</section>"
+    body += _count_table(con, True)
     (OUT / "checks_pending.html").write_text(page("앞으로 확인할 것", body, "⏳"), encoding="utf-8")
     dn = con.execute(SEL + " WHERE c.status!='pending' ORDER BY c.checked_at DESC, c.id").fetchall()
     tdy = [c for c in dn if (c["checked_at"] or "").startswith(today)]
     body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 오늘 확인한 것이 맨 앞, 그 아래에 오늘 것을 포함한 전체를 시간순으로 · <a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
     body += f"<section class='card'><h3>🆕 오늘({today}) 확인한 것 ({len(tdy)})</h3>{_rows(tdy) if tdy else '<p class=meta>오늘 확인한 항목이 없습니다. <code>uv run check.py set ID --status ...</code> 로 기록합니다.</p>'}</section>"
     body += f"<section class=card><h3>🗓️ 전체 (확인한 순서, 오래된 것부터)</h3>{_rows(sorted(dn, key=lambda c: (c['checked_at'] or '', c['id']))) if dn else '<p class=meta>아직 없습니다.</p>'}</section>"
+    body += _count_table(con, False)
     (OUT / "checks_done.html").write_text(page("확인한 것", body, "✅"), encoding="utf-8")
 
 def _fmt(v): return "-" if v is None else (f"{v:,.2f}".rstrip("0").rstrip("."))
