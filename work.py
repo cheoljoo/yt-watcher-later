@@ -128,6 +128,14 @@ def cmd_collect(a):
         shutil.rmtree(d, ignore_errors=True)
     COL.mkdir(parents=True, exist_ok=True); write_schemas()
     st["attempted"] = {}; st["round_submitted"] = 0
+    prior = {}
+    if getattr(a, "retry_failed", False):     # 자막 추출에 실패한 영상 전부를 오늘 다시 시도 대상으로 만든다 (새 영상은 건드리지 않음)
+        tod = D.today()
+        prior = {r["id"]: (r["transcript_status"], r["transcript_attempts"] or 0) for r in con.execute(
+            "SELECT id,transcript_status,transcript_attempts FROM videos WHERE status='done' AND transcript_status IN ('none','gave_up')")}
+        con.execute("UPDATE videos SET transcript_status='meta_only', transcript_retry_at=? WHERE status='done' AND transcript_status IN ('none','gave_up')", (tod,))
+        con.execute("UPDATE videos SET transcript_retry_at=? WHERE status='done' AND transcript_status IN ('pending_retry','meta_only') AND transcript_retry_at>?", (tod, tod))
+        con.commit()
     rows = con.execute("SELECT id,url,title,wl_position,owner,playlist_name FROM videos WHERE transcript_status IN ('pending_retry','meta_only') AND transcript_retry_at<=?", (D.today(),)).fetchall()
     retry = [{"id": r["id"], "url": r["url"], "title": r["title"], "pos": r["wl_position"], "owner": r["owner"] or "cheoljoo", "playlist": r["playlist_name"]} for r in rows]
     live_retry = {r[0] for r in con.execute("SELECT id FROM videos WHERE transcript_status='pending_retry'")}
@@ -139,7 +147,7 @@ def cmd_collect(a):
     ids = {v["id"] for v in retry}
     backlog = [v for v in vids if v["id"] not in done]
     have = {f.stem for f in COL.glob("*.json")}                         # 앞선 실행에서 이미 수집해 둔 것은 다시 받지 않는다
-    targets = retry + [v for v in backlog if v["id"] not in ids and v["id"] not in have]
+    targets = retry + ([] if getattr(a, "retry_failed", False) else [v for v in backlog if v["id"] not in ids and v["id"] not in have])
     con.execute("DELETE FROM backlog")
     con.executemany("INSERT OR REPLACE INTO backlog VALUES(?,?,?,?,?,?)", [(v["id"], v["title"], v["owner"], v["playlist"], v["pos"], D.now()) for v in backlog])
     con.commit()
@@ -154,6 +162,9 @@ def cmd_collect(a):
                     transcript_status=CASE WHEN transcript_status='meta_only' AND COALESCE(transcript_attempts,0)+1>=? THEN 'gave_up' ELSE transcript_status END,
                     transcript_retry_at=CASE WHEN transcript_status='meta_only' AND COALESCE(transcript_attempts,0)+1>=? THEN NULL ELSE ? END WHERE id=?""",
                     (M.MAX_SUB_TRY, M.MAX_SUB_TRY, (datetime.date.today() + datetime.timedelta(days=1)).isoformat(), v["id"]))
+        for vid, (old, att) in prior.items():                             # 원래 '자막 없음/포기' 였는데 이번에도 못 받았으면 원래 상태로 되돌린다(429 안내가 붙지 않게)
+            if not (got.get(vid) or {}).get("transcript"):
+                con.execute("UPDATE videos SET transcript_status=?, transcript_retry_at=NULL, transcript_attempts=? WHERE id=?", (old, att + 1, vid))
         con.commit()
         for v in targets:
             if v["id"] in got:
@@ -240,7 +251,8 @@ def cmd_finish(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("collect"); sub.add_parser("next"); sub.add_parser("status"); sub.add_parser("finish")
+    s = sub.add_parser("collect"); s.add_argument("--retry-failed", action="store_true", help="자막 추출에 실패한 영상만 다시 시도(새 영상 수집 안 함)")
+    sub.add_parser("next"); sub.add_parser("status"); sub.add_parser("finish")
     s = sub.add_parser("start"); s.add_argument("--budget", type=int, default=250000)
     s = sub.add_parser("submit"); s.add_argument("tid"); s.add_argument("--file")
     s = sub.add_parser("skip"); s.add_argument("tid"); s.add_argument("--reason", default="")

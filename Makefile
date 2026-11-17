@@ -18,7 +18,7 @@ UV      ?= uv run
 BACKUP  ?= $(or $(YT_BACKUP_DIR),$(HOME)/yt-watcher-later-backup)
 
 .DEFAULT_GOAL := help
-.PHONY: help report daily daily-claude collect status finish check-due export \
+.PHONY: help report daily daily-claude collect status finish check-due export retry-subs retry-subs-collect \
         opinion-status opinion-restart opinion-log cron-show \
         backup backup-verify backup-restore backup-push
 
@@ -39,6 +39,12 @@ collect: ## 재생목록에서 새 영상만 수집 (AI 분석은 안 함)
 
 status: ## 오늘 작업 큐 상태 (more/all_done/stalled 와 제출 건수)
 	-$(UV) work.py status
+
+retry-subs-collect: ## 자막(Script) 추출에 실패한 영상만 다시 받기 (yt-dlp → youtube-transcript-api 폴백, LLM 분석은 안 함)
+	$(UV) work.py collect --retry-failed
+
+retry-subs: ## 자막 추출 실패 영상을 다시 받고, 받은 영상은 LLM(agy)으로 다시 분석 + 리포트·백업 (make retry-subs TOOL=claude 로 Claude 사용)
+	./run_skill.sh --$(or $(TOOL),agy) --retry-failed
 
 finish: ## 지표 시세 반영 + 리포트·JSON 재생성 + (백업 폴더가 있으면) DB 백업
 	$(UV) work.py finish
