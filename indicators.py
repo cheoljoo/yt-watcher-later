@@ -46,6 +46,7 @@ def register(con):
         con.execute("INSERT OR IGNORE INTO indicators(name,category,first_seen_at) VALUES(?,?,?)", (name, cat, D.now()))
         iid = con.execute("SELECT id FROM indicators WHERE name=?", (name,)).fetchone()[0]
         con.execute("INSERT OR IGNORE INTO indicator_sources VALUES(?,?,?)", (iid, vid, why))
+    import indicator_seed; indicator_seed.seed(con)       # 영상과 무관하게 항상 추적할 기본 지표(증시 자금·국내 부동산)
     for r in con.execute("SELECT id, indicators_to_watch FROM videos WHERE status='done' AND indicators_to_watch IS NOT NULL").fetchall():
         try: items = json.loads(r["indicators_to_watch"])
         except Exception: continue
@@ -94,7 +95,7 @@ def map_sources(con, cfg):
 def merge_duplicates(con):
     """같은 출처·심볼을 가리키는 지표는 하나로 합친다(가장 짧은 이름이 대표). 나머지는 별칭(alias_of)으로 비활성화하고 영상 출처를 대표에 옮긴다."""
     n = 0
-    for g in con.execute("SELECT source, symbol FROM indicators WHERE source IN ('yahoo','fred') AND symbol!='' AND alias_of IS NULL GROUP BY source, symbol HAVING count(*)>1").fetchall():
+    for g in con.execute("SELECT source, symbol FROM indicators WHERE source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx') AND symbol!='' AND alias_of IS NULL GROUP BY source, symbol HAVING count(*)>1").fetchall():
         rows = sorted(con.execute("SELECT id,name FROM indicators WHERE source=? AND symbol=? AND alias_of IS NULL", (g["source"], g["symbol"])).fetchall(), key=lambda r: (len(r["name"]), r["id"]))
         main, rest = rows[0]["id"], rows[1:]
         for r in rest:
@@ -113,7 +114,8 @@ def _pct(a, b): return None if a is None or b in (None, 0) else (a - b) / abs(b)
 def analyze_series(ind, rows):
     """실제 시계열 -> 현재값/직전값/변화율/방향/신호. 신호 = 경고(급변) | 임계값 돌파 | 방향 전환."""
     last_d, last = rows[-1]; prev = rows[-2][1] if len(rows) > 1 else None
-    k = 5 if ind["source"] == "yahoo" else 1                # 시장 시세는 1주, 월간 거시지표는 직전 발표 대비
+    daily = ind["source"] in ("yahoo", "kofia", "multpl", "krx")
+    k = 5 if daily else 1                                    # 일간 시계열은 1주, 월간·분기 거시지표는 직전 발표 대비
     ref = rows[-1 - k][1] if len(rows) > k else prev
     ref2 = rows[-1 - 2 * k][1] if len(rows) > 2 * k else None
     d_now, d_before = _dir(_pct(last, ref)), _dir(_pct(ref, ref2))
@@ -124,7 +126,7 @@ def analyze_series(ind, rows):
     elif prev is not None and hi is not None and last <= hi < prev: sig, why = "threshold", f"상단 임계 {hi:g} 아래로 복귀"
     elif prev is not None and lo is not None and prev >= lo > last: sig, why = "threshold", f"하단 임계 {lo:g} 이탈"
     elif prev is not None and lo is not None and last >= lo > prev: sig, why = "threshold", f"하단 임계 {lo:g} 위로 복귀"
-    if chg is not None and abs(chg) >= 5 and ind["source"] == "yahoo": sig, why = "warning", f"전 거래일 대비 {chg:+.1f}% 급변"
+    if chg is not None and abs(chg) >= 5 and daily: sig, why = "warning", f"전 거래일 대비 {chg:+.1f}% 급변"
     if not sig and {d_now, d_before} == {"up", "down"}: sig, why = "direction", f"추세 전환: {d_before} → {d_now}"
     return dict(value=last, value_date=last_d, prev=prev, chg=None if chg is None else round(chg, 2), direction=d_now, signal=sig, why=why)
 
@@ -140,11 +142,13 @@ def _line(ind, value, value_date, prev, chg, direction):
     return (f"{ind['name']} | 단위 {ind['unit'] or '-'} | 기준 {ind['baseline'] or '-'} | 현재 {_fmt(value)} ({value_date}) | "
             f"직전 {_fmt(prev) if prev is not None else '-'} | 변화 {chg}% | 추세 {direction}")
 
-def gather_values(con, force=False):
-    """(코드) 활성 지표의 실제 시세를 받아 오늘 값·변화·신호를 저장한다(의미 해설은 비워 둠). 이미 수집했으면 None."""
+def gather_values(con, force=False, ids=None):
+    """(코드) 활성 지표의 실제 시세를 받아 오늘 값·변화·신호를 저장한다(의미 해설은 비워 둠). 이미 수집했으면 None.
+    ids: 이 지표들만 받는다(새로 추가한 지표를 그날 바로 채울 때 — 이미 받은 다른 지표의 값·해설은 건드리지 않는다)."""
     today = D.today()
-    if not force and con.execute("SELECT 1 FROM indicator_values WHERE date=? LIMIT 1", (today,)).fetchone(): return None
-    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred') AND symbol!=''").fetchall()
+    if not force and not ids and con.execute("SELECT 1 FROM indicator_values WHERE date=? LIMIT 1", (today,)).fetchone(): return None
+    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx') AND symbol!=''").fetchall()
+    if ids: inds = [x for x in inds if x["id"] in set(ids)]
     skipped = con.execute("SELECT count(*) FROM indicators WHERE active=1 AND (source IS NULL OR source='none' OR symbol='')").fetchone()[0]
     with ThreadPoolExecutor(5) as ex: series = list(ex.map(lambda i: marketdata.fetch(i["source"], i["symbol"]), inds))
     n = 0

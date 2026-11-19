@@ -56,7 +56,7 @@ def build_items(con, due):
     for c in due:
         i = con.execute("SELECT * FROM indicators WHERE name=?", (c["target"],)).fetchone()
         if i and i["alias_of"]: i = con.execute("SELECT * FROM indicators WHERE id=?", (i["alias_of"],)).fetchone()
-        if i and i["source"] in ("yahoo", "fred") and i["symbol"]: ind_of[c["id"]] = i
+        if i and i["source"] in marketdata.SOURCES and i["symbol"]: ind_of[c["id"]] = i
     syms = {(i["source"], i["symbol"]) for i in ind_of.values()}
     with ThreadPoolExecutor(5) as ex: data = dict(zip(syms, ex.map(lambda s: marketdata.fetch(*s), syms)))
     items, today = [], D.today()

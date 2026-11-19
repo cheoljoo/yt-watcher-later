@@ -122,6 +122,30 @@ def _ind_card(i, v, srcs):
     h += f"<p class=meta>시세 출처 매핑: 🤖 {e(i['map_llm'] or '-')}</p><p class=meta>출처 영상: " + ", ".join(f"<a href='{e(s['processed_date'])}.html#v-{e(s['video_id'])}'>{e((s['title'] or '')[:24])}</a>" for s in srcs[:5]) + "</p></details></tr>"
     return h
 
+def _latest(con, name):
+    return con.execute("SELECT v.value, v.value_text, v.value_date FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE i.name=? AND v.value IS NOT NULL ORDER BY v.date DESC LIMIT 1", (name,)).fetchone()
+
+def pbr_block(con):
+    """한국·미국 증시의 현재 PBR 과 선행 PBR 을 나란히(DB 의 최신 값). 값이 없으면 '수집 미연결'로 표시한다."""
+    def cell(name):
+        x = _latest(con, name)
+        return (f"<b>{x['value']:.2f}배</b><br><span class=meta>기준일 {e(x['value_date'] or '-')}</span>" if x else "<span class=meta>값 없음 (수집 미연결)</span>"), (x["value"] if x else None)
+    rows = ""
+    for mk, cur, fwd in (("🇰🇷 한국 (코스피)", "한국 코스피 현재 PBR", "한국 코스피 선행 PBR"), ("🇺🇸 미국 (S&P 500)", "미국 S&P500 현재 PBR", "미국 S&P500 선행 PBR")):
+        (c, cv), (f, fv) = cell(cur), cell(fwd)
+        gap = f"{(fv - cv) / cv * 100:+.1f}%" if cv and fv else "<span class=meta>-</span>"
+        rows += f"<tr><td>{mk}<td>{c}<td>{f}<td>{gap}</tr>"
+    return ("<section class=card><h3>📐 PBR 비교 — 현재 vs 선행</h3><table><tr><th>시장<th>현재 PBR<th>선행 PBR<th>선행 ÷ 현재 − 1</tr>" + rows +
+            "</table><p class=meta>선행 PBR 은 향후 12개월 예상 순자산 기준이라 애널리스트 컨센서스(유료·로그인 자료)가 필요합니다. 연결되기 전까지는 현재 PBR 만 기록됩니다.</p></section>")
+
+def seed_pending_block(con):
+    """기본 지표(indicator_seed) 중 자동 수집이 아직 연결되지 않아 값이 없는 것."""
+    import indicator_seed as S
+    names = [s["name"] for s in S.SEED if s["source"] == "none"]
+    if not names: return ""
+    items = "".join(f"<li><b>{e(r['name'])}</b> <span class=meta>{e(r['category'] or '')}</span></li>" for r in con.execute(f"SELECT name,category FROM indicators WHERE name IN ({','.join('?' * len(names))}) ORDER BY category,name", names))
+    return f"<section class=card><h3>📭 값이 아직 없는 기본 지표 ({len(names)})</h3><p class=meta>공식 OpenAPI 인증키(한국부동산원 R-ONE·한국은행 ECOS·국토교통부)나 유료 컨센서스가 있어야 자동 수집할 수 있어 아직 연결되지 않았습니다. 지표 정의는 DB에 등록돼 있습니다.</p><ul>{items}</ul></section>"
+
 def build_indicators(con):
     last = con.execute("SELECT max(date) FROM indicator_values").fetchone()[0]
     body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a></p>" + IND_LEGEND + macro_block(con)
@@ -131,12 +155,14 @@ def build_indicators(con):
     rows = con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning, v.llm
                           FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE v.date=? ORDER BY i.importance DESC, i.category, i.name""", (last,)).fetchall()
     srcs = lambda iid: con.execute("SELECT s.video_id, vd.title, COALESCE(vd.run_id, vd.processed_date) AS processed_date FROM indicator_sources s JOIN videos vd ON vd.id=s.video_id WHERE s.indicator_id=?", (iid,)).fetchall()
+    body += pbr_block(con)
     head = "<table class=num><tr><th>지표<th>값 / 전일 대비 · 1주 추세<th>신호 · 의미<th>설명</tr>"
     changed = sorted([r for r in rows if r["signal"]], key=lambda r: ["warning", "threshold", "direction"].index(r["signal"]))
     body += f"<section class='card due'><h3>🚨 {e(last)} 변화·경고 ({len(changed)})</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만</p>"
     body += (head + "".join(_ind_card(r, r, srcs(r["id"])) for r in changed) + "</table>") if changed else "<p class=meta>오늘은 해당 항목이 없습니다.</p>"
     body += "</section>"
     body += f"<section class=card><h3>📋 전체 지표·종목 ({len(rows)}) — 위 항목 포함</h3>{head}{''.join(_ind_card(r, r, srcs(r['id'])) for r in rows)}</table></section>"
+    body += seed_pending_block(con)
     pend = con.execute("SELECT count(*) FROM indicators WHERE active=1").fetchone()[0]
     body += f"<p class=meta>등록된 지표 {pend}개 · 값을 구하지 못한 지표는 그날 건너뜁니다 · 값은 모델이 아는 최근 값이며 실시간이 아닙니다(🕰️ 표시는 기준일이 90일 넘게 오래된 값 — 경고도 참고용으로만 볼 것).</p>"
     (OUT / "indicators.html").write_text(page("지표 대시보드", body, "📊"), encoding="utf-8")
