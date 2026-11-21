@@ -85,6 +85,9 @@ def gen_values(con, st):
     I.merge_duplicates(con)
     g = I.gather_values(con)
     if g: print(f"   실제 값 {g[0]}/{g[1]}개 기록 (출처 없음 {g[2]}개는 건너뜀)", file=sys.stderr)
+    try:
+        import leading_fetch; leading_fetch.run_if_stale()      # 선행지수 페이지용 장기 시계열(하루 한 번)
+    except Exception as ex: print(f"   선행지수 시계열 갱신 실패: {ex}", file=sys.stderr)
 
 def gen_meaning(con, st):
     gen_values(con, st)

@@ -49,7 +49,7 @@ def secret(name):
 
 def ecos(symbol):
     """한국은행 ECOS(인증키 필요: ~/.config/yt-watcher-later/env 의 ECOS_API_KEY). symbol = "통계표/주기/항목1[/항목2..][|옵션...]"
-    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, scale=배율, 예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001"""
+    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, ma3 = 3기간 이동평균, scale=배율, 예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001"""
     key = secret("ECOS_API_KEY")
     if not key: return None
     try:
@@ -68,6 +68,7 @@ def ecos(symbol):
         for o in opts:
             if o == "diff": rows = [(rows[i][0], rows[i][1] - rows[i - 1][1]) for i in range(1, len(rows))]
             elif o.startswith("scale="): rows = [(d, v * float(o[6:])) for d, v in rows]
+            elif o == "ma3": rows = [(rows[i][0], sum(v for _, v in rows[i - 2:i + 1]) / 3) for i in range(2, len(rows))]
         return rows or None
     except Exception: return None
 
