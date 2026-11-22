@@ -10,8 +10,51 @@ def fmt(v):
     if v is None: return "-"
     return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:,.2f}".rstrip("0").rstrip(".")
 
+LONG = 20          # 점이 이보다 많으면 점마다 글씨를 달지 않는 '긴 시계열' 모양으로 그린다
+YEARS = 3          # 그래프에 그리는 기간(최근 N년)
+
+def chart_long(pts, lo, hi, marks, phase_days, W=300, H=96, line_pts=160, hover_pts=60):
+    """긴 시계열(일간 수백 점): 선은 일정 간격으로 줄여 그리고, 처음·끝·최고·최저 값만 글씨로, 날짜는 연 단위 눈금, 중요한 날은 붉은 점, 마우스를 올리면 값."""
+    vals = [v for _, v in pts]
+    ys = vals + [x for x in (lo, hi) if x is not None and min(vals) - (max(vals) - min(vals)) <= x <= max(vals) + (max(vals) - min(vals))]
+    mn, mx = min(ys), max(ys)
+    if mn == mx: mn, mx = mn - 1, mx + 1
+    X0, X1, Y0, Y1 = 8, W - 8, 14, H - 22; n = len(pts)
+    px = lambda i: X0 + (X1 - X0) * i / (n - 1)
+    py = lambda v: Y1 - (Y1 - Y0) * (v - mn) / (mx - mn)
+    step = max(1, n // line_pts); idx = sorted(set(range(0, n, step)) | {n - 1})
+    s = f"<svg viewBox='0 0 {W} {H}' width='100%' role=img aria-label='추이 그래프'>"
+    for i, (d, _) in enumerate(pts):
+        if d in phase_days: s += f"<rect x={px(i) - 3:.1f} y=2 width=6 height={H - 20} fill='#7b5ea7' opacity=.14><title>{d}: 매크로 위치 변경</title></rect>"
+    for val, lab in ((lo, "하한"), (hi, "상한")):
+        if val is not None and mn <= val <= mx:
+            s += f"<line x1={X0} x2={X1} y1={py(val):.1f} y2={py(val):.1f} stroke='#c0392b' stroke-dasharray='4 3' opacity=.6 /><text x={X1} y={py(val) - 2:.1f} text-anchor=end font-size=9 fill='#c0392b'>경고 {lab} {fmt(val)}</text>"
+    s += "<polyline fill=none stroke='var(--ac)' stroke-width=1.6 points='" + " ".join(f"{px(i):.1f},{py(pts[i][1]):.1f}" for i in idx) + "' />"
+    for i in idx[::max(1, len(idx) // hover_pts)]:
+        s += f"<circle cx={px(i):.1f} cy={py(pts[i][1]):.1f} r=4 fill=transparent><title>{pts[i][0]}: {fmt(pts[i][1])}</title></circle>"
+    for i, (d, v) in enumerate(pts):
+        m = marks.get(d)
+        if m: s += f"<circle cx={px(i):.1f} cy={py(v):.1f} r=4 fill='#c0392b'><title>{d}: {fmt(v)} — {e(m)}</title></circle>"
+    hi_i, lo_i = max(range(n), key=lambda i: pts[i][1]), min(range(n), key=lambda i: pts[i][1])
+    lab = {0: "s", n - 1: "e", hi_i: "h", lo_i: "l"}
+    for i in (hi_i, lo_i):                                              # 끝점 바로 옆(같은 값)이면 글씨가 겹치니 끝점 것만
+        if i == n - 2 and pts[i][1] == pts[n - 1][1]: lab.pop(i, None)
+    for i, kind in sorted(lab.items()):
+        anc = "start" if i < n * .12 else "end" if i > n * .88 else "middle"
+        dy = -6 if kind in "seh" else 12
+        s += f"<circle cx={px(i):.1f} cy={py(pts[i][1]):.1f} r=2.6 fill=currentColor /><text x={px(i):.1f} y={py(pts[i][1]) + dy:.1f} text-anchor={anc} font-size=9.5 fill=currentColor>{fmt(pts[i][1])}</text>"
+    last_tick = -99
+    for i, (d, _) in enumerate(pts):                                   # 연·월 눈금: 해가 바뀌는 곳 + 처음·끝
+        key = d[:4] if d[5:7] == "01" or i == 0 else None
+        edge = i in (0, n - 1)
+        if (key and px(i) - last_tick > 30) or edge:
+            anc = "start" if i == 0 else "end" if i == n - 1 else "middle"; last_tick = px(i)
+            s += f"<text x={px(i):.1f} y={H - 6} text-anchor={anc} font-size=9 fill=currentColor opacity=.6>{d[2:7] if edge else d[:4]}</text>"
+    return s + "</svg>"
+
 def chart(pts, lo, hi, marks=None, phase_days=(), W=300, H=96):
     """pts: [(date, value)] -> 인라인 SVG 선 그래프. 경고 임계값(lo/hi)이 범위 안이면 점선으로 표시."""
+    if len(pts) > LONG: return chart_long(pts, lo, hi, marks or {}, phase_days, W, H)
     vals = [v for _, v in pts]
     ys = vals + [x for x in (lo, hi) if x is not None and min(vals) - (max(vals) - min(vals)) * 1.0 <= x <= max(vals) + (max(vals) - min(vals)) * 1.0]
     mn, mx = min(ys), max(ys)
@@ -80,7 +123,7 @@ def situation(con, series):
         if len(s["pts"]) > 1 and s["pts"][0][1]:
             moves.append(((s["pts"][-1][1] - s["pts"][0][1]) / abs(s["pts"][0][1]) * 100, s))
     up = sum(1 for m, _ in moves if m > 0.05); dn = sum(1 for m, _ in moves if m < -0.05)
-    out.append(f"<b>변화</b>: 이력이 2일 이상인 지표 {len(moves)}개 중 상승 {up}개 · 하락 {dn}개 · 변화 없음 {len(moves) - up - dn}개.")
+    out.append(f"<b>변화</b>(그래프 기간의 처음→끝): 이력이 2일 이상인 지표 {len(moves)}개 중 상승 {up}개 · 하락 {dn}개 · 변화 없음 {len(moves) - up - dn}개.")
     big = sorted(moves, key=lambda x: -abs(x[0]))[:5]
     if big: out.append("<b>변동이 큰 지표</b>: " + ", ".join(f"{e(s['name'])} {m:+.1f}%" for m, s in big if abs(m) > 0.05) + ".")
     sig = [s for s in series if s["rows"][-1]["signal"]]
@@ -94,11 +137,21 @@ def build(con):
     series = {}
     for r in con.execute("SELECT * FROM indicator_values WHERE value IS NOT NULL ORDER BY date"):
         if r["indicator_id"] in inds: series.setdefault(r["indicator_id"], []).append(r)
-    ser = [{"id": i, "name": inds[i]["name"], "ind": inds[i], "rows": rs, "pts": [(r["date"], r["value"]) for r in rs]} for i, rs in series.items()]
+    import datetime
+    cut = (datetime.date.today() - datetime.timedelta(days=int(YEARS * 365.25))).isoformat()        # 그래프·요약은 최근 3년치만 (DB 에는 그 이전도 있을 수 있다)
+    def dedupe(rs):
+        """일일 수집이 같은 값(월간 지표·휴장일)을 날마다 쌓은 행은 한 점으로 줄인다. 마지막 행은 항상 남긴다."""
+        out = []
+        for r in rs:
+            if out and r["value_date"] == out[-1]["value_date"] and r["value"] == out[-1]["value"]: continue
+            out.append(r)
+        return out + ([rs[-1]] if rs and out[-1] is not rs[-1] else [])
+    series = {i: [r for r in rs if r["date"] >= cut] for i, rs in series.items()}
+    ser = [{"id": i, "name": inds[i]["name"], "ind": inds[i], "rows": rs, "drows": dedupe(rs), "pts": [(r["date"], r["value"]) for r in dedupe(rs)]} for i, rs in series.items() if rs]
     import indfilter as F
     ser.sort(key=lambda s: F.sort_key(s["ind"]) + (s["ind"]["importance"] != "high", s["name"]))
     days = sorted({d for s in ser for d, _ in s["pts"]})
-    body = (f"<h1>📉 지표 추이</h1><p class=meta>날짜별로 DB에 쌓인 지표 값({days[0] if days else '-'} ~ {days[-1] if days else '-'}, {len(days)}일치) · 지표 {len(ser)}개 · "
+    body = (f"<h1>📉 지표 추이</h1><p class=meta>날짜별로 DB에 쌓인 지표 값({days[0] if days else '-'} ~ {days[-1] if days else '-'}, {len(days)}일치, 그래프는 최근 {YEARS}년) · 지표 {len(ser)}개 · "
             "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='index.html'>🏠 홈</a></p>")
     body += "<section class=card><h3>🧭 전체 상황</h3>" + situation(con, ser) + "<p class=meta>숫자로 자동 생성한 요약입니다. 지표별 원인 해석은 아래 카드의 'AI 해설'과 대시보드를 참고하세요. 이력이 쌓일수록 정확해집니다.</p></section>"
     mac = con.execute("SELECT date, phase_index FROM macro_daily ORDER BY date").fetchall()
@@ -117,7 +170,10 @@ def build(con):
         cur = (k, c)
         last = s["rows"][-1]
         star = "⭐ " if s["ind"]["importance"] == "high" else ""
-        km = key_days(s["rows"])
+        km = key_days(s["drows"])
+        for big in (5, 8, 12, 20, 40):                                  # 긴 시계열은 붉은 점이 너무 많아지지 않게 기준을 올려 10개 안쪽으로
+            if len(km) <= 10: break
+            km = key_days(s["drows"], big)
         body += (f"<section {F.attrs(s['ind'], cls='card vc')} id='i-{s['id']}'><h3>{star}{e(s['name'])}</h3>{chart(s['pts'], s['ind']['warn_low'], s['ind']['warn_high'], km, phase_days)}"
                  f"<p>{e(explain(s['name'], s['ind']['unit'], s['pts'], s['rows'], s['ind']))}</p>")
         if km: body += "<p><b>🔴 중요한 날</b></p><ul>" + "".join(f"<li><b>{d}</b> {e(w)}" for d, w in km.items()) + "</ul>"

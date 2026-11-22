@@ -13,8 +13,10 @@ def _get(url, tries=3, ua=UA):
             time.sleep(2 * (i + 1))
     return None
 
-def yahoo(symbol):
-    t = _get(f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?range=6mo&interval=1d")
+def yahoo(symbol, back=None):
+    """back: 며칠 전부터 받을지(1회성 이력 채우기용). 없으면 최근 6개월."""
+    rng = "range=6mo" if not back else f"period1={int(time.time()) - back * 86400}&period2={int(time.time()) + 172800}"
+    t = _get(f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?{rng}&interval=1d")
     try:
         res = json.loads(t)["chart"]["result"][0]
         ts, cl = res["timestamp"], res["indicators"]["quote"][0]["close"]
@@ -25,8 +27,8 @@ def yahoo(symbol):
 
 YOY = {"CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "M2SL", "WALCL", "GDPC1", "INDPRO", "RSAFS"}   # 지수/레벨 -> 전년 대비 %
 
-def fred(series):
-    start = (datetime.date.today() - datetime.timedelta(days=900)).isoformat()
+def fred(series, back=None):
+    start = (datetime.date.today() - datetime.timedelta(days=max(900, back or 0))).isoformat()
     t = _get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={urllib.parse.quote(series)}&cosd={start}{'&transformation=pc1' if series in YOY else ''}", ua={"User-Agent": "curl/8.5.0"})
     try:
         rows = [(d, float(v)) for d, v in list(csv.reader(io.StringIO(t)))[1:] if v not in ("", ".")]
@@ -47,17 +49,17 @@ def secret(name):
     except Exception: pass
     return None
 
-def ecos(symbol):
+def ecos(symbol, back=None):
     """한국은행 ECOS(인증키 필요: ~/.config/yt-watcher-later/env 의 ECOS_API_KEY). symbol = "통계표/주기/항목1[/항목2..][|옵션...]"
     주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, ma3 = 3기간 이동평균, scale=배율, 예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001"""
     key = secret("ECOS_API_KEY")
     if not key: return None
     try:
         main, *opts = symbol.split("|"); stat, cyc, *items = main.split("/")
-        today = datetime.date.today(); back = today - datetime.timedelta(days=1100 if cyc in ("M", "Q", "A") else 200)
+        today = datetime.date.today(); back_d = today - datetime.timedelta(days=max(back or 0, 1100 if cyc in ("M", "Q", "A") else 200))
         fmt = {"M": lambda d: d.strftime("%Y%m"), "D": lambda d: d.strftime("%Y%m%d"), "A": lambda d: d.strftime("%Y"),
                "Q": lambda d: f"{d.year}Q{(d.month - 1) // 3 + 1}"}[cyc]
-        t = _get(f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/400/{stat}/{cyc}/{fmt(back)}/{fmt(today)}/" + "/".join(items))
+        t = _get(f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/10000/{stat}/{cyc}/{fmt(back_d)}/{fmt(today)}/" + "/".join(items))
         rows = []
         for r in json.loads(t)["StatisticSearch"]["row"]:
             p, v = r["TIME"], r["DATA_VALUE"]
@@ -72,7 +74,7 @@ def ecos(symbol):
         return rows or None
     except Exception: return None
 
-def rone(symbol):
+def rone(symbol, back=None):
     """한국부동산원 R-ONE OpenAPI(인증키 필요: ~/.config/yt-watcher-later/env 의 RONE_API_KEY).
     symbol = "통계표ID/주기/지역(CLS_ID)/항목(ITM_ID)[|scale=배율]"  주기 MM(월)·WK(주). 예) A_2024_00554/MM/500001/100001 = 전국 아파트 매매거래 호수
     CLS_ID·ITM_ID 로 걸러 마지막 두 쪽(최근 값 수십 개)만 받는다."""
@@ -83,8 +85,9 @@ def rone(symbol):
         base = f"https://www.reb.or.kr/r-one/openapi/SttsApiTblData.do?KEY={key}&Type=json&STATBL_ID={sid}&DTACYCLE_CD={cyc}&CLS_ID={cls}&ITM_ID={itm}"
         def page(i, size): return json.loads(_get(f"{base}&pIndex={i}&pSize={size}"))["SttsApiTblData"]
         total = page(1, 1)[0]["head"][0]["list_total_count"]; size = 24; last = (total + size - 1) // size
+        npg = 2 if not back else max(2, back // (7 if cyc == "WK" else 30) // size + 2)       # 이력 채우기는 필요한 만큼 더 뒤 쪽까지
         rows = []
-        for i in {last, max(1, last - 1)}: rows += page(i, size)[1]["row"]
+        for i in {max(1, last - k) for k in range(npg)}: rows += page(i, size)[1]["row"]
         out = {}
         for r in rows:
             if r["DTA_VAL"] is None: continue
@@ -97,12 +100,12 @@ def rone(symbol):
         return rows or None
     except Exception: return None
 
-def kofia(symbol):
+def kofia(symbol, back=None):
     """금융투자협회 FreeSIS(키 불필요). symbol = "표ID:열[:배율]" — 열은 TMPV2 처럼, 배율은 값에 곱할 수(기본 1e-6 = 백만원 → 조원).
     예) STATSCU0100000060BO:TMPV2 = 투자자예탁금(조원), STATSCU0100000070BO:TMPV2 = 신용거래융자 잔고(조원)."""
     try:
         obj, col, *sc = symbol.split(":"); scale = float(sc[0]) if sc else 1e-6
-        end = datetime.date.today(); start = end - datetime.timedelta(days=200)
+        end = datetime.date.today(); start = end - datetime.timedelta(days=max(200, back or 0))
         body = json.dumps({"dmSearch": {"tmpV40": "1000000", "tmpV41": "1", "tmpV1": "D", "tmpV45": start.strftime("%Y%m%d"),
                                          "tmpV46": end.strftime("%Y%m%d"), "OBJ_NM": obj}}).encode()
         for i in range(3):
@@ -124,6 +127,17 @@ def multpl(symbol):
         x = re.search(r"Current[^\"]*? is (-?[\d.]+), a change of (-?[\d.]+)", t)
         v, ch = float(x.group(1)), float(x.group(2)); today = datetime.date.today()
         return [((today - datetime.timedelta(days=1)).isoformat(), round(v - ch, 4)), (today.isoformat(), v)]
+    except Exception: return None
+
+def multpl_history(symbol):
+    """multpl.com 월별 표(…/table/by-month)에서 과거 월별 값. 이력 채우기 전용."""
+    import re
+    t = _get(f"https://www.multpl.com/{urllib.parse.quote(symbol)}/table/by-month", ua={"User-Agent": "Mozilla/5.0"})
+    try:
+        out = []
+        for d, v in re.findall(r"<td[^>]*>\s*([A-Z][a-z]{2} \d{1,2}, \d{4})\s*</td>\s*<td[^>]*>[^\d\-<]*(?:<[^>]*>[^\d\-<]*)*([-\d.,]+)", t):
+            out.append((datetime.datetime.strptime(d, "%b %d, %Y").date().isoformat(), float(v.replace(",", ""))))
+        return sorted(out) or None
     except Exception: return None
 
 def _krx_session():
@@ -148,6 +162,29 @@ def _n(x):
     try: return float(str(x).replace(",", ""))
     except Exception: return None
 
+def _krx_point(s, symbol, day):
+    """한 영업일 day(YYYYMMDD)의 시장 값. 휴장·자료 없음이면 None."""
+    if symbol == "pbr":
+        pb = {r["ISU_SRT_CD"]: _n(r["PBR"]) for r in _krx_rows(s, "MDCSTAT03501", searchType="1", mktId="STK", trdDd=day)}
+        if not pb: return None
+        cap = {}
+        for r in _krx_rows(s, "MDCSTAT03701", searchType="1", mktId="STK", trdDd=day, isuCd=""):      # 시가총액 = 종가 × 상장주식수
+            px, sh = _n(r["TDD_CLSPRC"]), _n(r["LIST_SHRS"])
+            if px and sh: cap[r["ISU_SRT_CD"]] = px * sh
+        num = sum(cap[k] for k, v in pb.items() if v and v > 0 and cap.get(k))
+        den = sum(cap[k] / v for k, v in pb.items() if v and v > 0 and cap.get(k))
+        return (f"{day[:4]}-{day[4:6]}-{day[6:]}", round(num / den, 4)) if den else None
+    if symbol == "forn200":
+        codes = {r["ISU_SRT_CD"] for r in _krx_rows(s, "MDCSTAT00601", indIdx="1", indIdx2="028", trdDd=day, money="1", share="1")}
+        if not codes: return None
+        a = b = 0.0
+        for r in _krx_rows(s, "MDCSTAT03701", searchType="1", mktId="STK", trdDd=day, isuCd=""):
+            if r["ISU_SRT_CD"] in codes:
+                px, sh, fq = _n(r["TDD_CLSPRC"]), _n(r["LIST_SHRS"]), _n(r["FORN_HD_QTY"])
+                if px and sh and fq is not None: a += fq * px; b += sh * px
+        return (f"{day[:4]}-{day[4:6]}-{day[6:]}", round(a / b * 100, 3)) if b else None
+    return None
+
 def krx(symbol):
     """KRX 정보데이터시스템(로그인) 에서 시장 단위 값을 계산한다. 최근 영업일 2개 점을 돌려준다.
     symbol = "pbr"     코스피 전체 PBR = Σ시가총액 ÷ Σ순자산(종목 PBR>0 인 것만, 순자산 = 시가총액÷PBR)
@@ -158,30 +195,35 @@ def krx(symbol):
         out, d = [], datetime.date.today()
         for _ in range(12):
             if len(out) == 2: break
-            day = d.strftime("%Y%m%d"); d -= datetime.timedelta(days=1)
-            if symbol == "pbr":
-                pb = {r["ISU_SRT_CD"]: _n(r["PBR"]) for r in _krx_rows(s, "MDCSTAT03501", searchType="1", mktId="STK", trdDd=day)}
-                if not pb: continue
-                cap = {}
-                for r in _krx_rows(s, "MDCSTAT03701", searchType="1", mktId="STK", trdDd=day, isuCd=""):      # 시가총액 = 종가 × 상장주식수
-                    px, sh = _n(r["TDD_CLSPRC"]), _n(r["LIST_SHRS"])
-                    if px and sh: cap[r["ISU_SRT_CD"]] = px * sh
-                num = sum(cap[k] for k, v in pb.items() if v and v > 0 and cap.get(k))
-                den = sum(cap[k] / v for k, v in pb.items() if v and v > 0 and cap.get(k))
-                if den: out.append((f"{day[:4]}-{day[4:6]}-{day[6:]}", round(num / den, 4)))
-            elif symbol == "forn200":
-                codes = {r["ISU_SRT_CD"] for r in _krx_rows(s, "MDCSTAT00601", indIdx="1", indIdx2="028", trdDd=day, money="1", share="1")}
-                if not codes: continue
-                a = b = 0.0
-                for r in _krx_rows(s, "MDCSTAT03701", searchType="1", mktId="STK", trdDd=day, isuCd=""):
-                    if r["ISU_SRT_CD"] in codes:
-                        px, sh, fq = _n(r["TDD_CLSPRC"]), _n(r["LIST_SHRS"]), _n(r["FORN_HD_QTY"])
-                        if px and sh and fq is not None: a += fq * px; b += sh * px
-                if b: out.append((f"{day[:4]}-{day[4:6]}-{day[6:]}", round(a / b * 100, 3)))
+            p = _krx_point(s, symbol, d.strftime("%Y%m%d")); d -= datetime.timedelta(days=1)
+            if p: out.append(p)
+        return sorted(out) or None
+    except Exception: return None
+
+def krx_history(symbol, months):
+    """이력 채우기 전용: 최근 months 개월의 '월말(마지막 영업일)' 값. 하루 값마다 수천 종목을 받아야 해서 일별 대신 월말만 받는다."""
+    try:
+        s = _krx_session()
+        if s is None: return None
+        out, today = [], datetime.date.today()
+        for k in range(months):
+            y, m = divmod(today.year * 12 + today.month - 1 - k, 12); m += 1
+            d = min(datetime.date(y + (m == 12), m % 12 + 1, 1) - datetime.timedelta(days=1), today)       # 그 달 말일(이번 달이면 오늘)
+            for _ in range(7):                                    # 말일이 휴장이면 직전 영업일
+                p = _krx_point(s, symbol, d.strftime("%Y%m%d")); d -= datetime.timedelta(days=1)
+                if p: out.append(p); break
         return sorted(out) or None
     except Exception: return None
 
 SOURCES = ("yahoo", "fred", "kofia", "multpl", "ecos", "rone", "krx")           # 자동으로 값을 받을 수 있는 출처
 
-def fetch(source, symbol):
-    return yahoo(symbol) if source == "yahoo" else fred(symbol) if source == "fred" else kofia(symbol) if source == "kofia" else multpl(symbol) if source == "multpl" else ecos(symbol) if source == "ecos" else rone(symbol) if source == "rone" else krx(symbol) if source == "krx" else None
+def fetch(source, symbol, back=None):
+    """back: 며칠 전까지의 이력을 받을지(1회성 이력 채우기). 없으면 평소처럼 최근 값만."""
+    if source == "yahoo": return yahoo(symbol, back)
+    if source == "fred": return fred(symbol, back)
+    if source == "kofia": return kofia(symbol, back)
+    if source == "ecos": return ecos(symbol, back)
+    if source == "rone": return rone(symbol, back)
+    if source == "multpl": return (multpl_history(symbol) if back else None) or multpl(symbol)
+    if source == "krx": return (krx_history(symbol, back // 30) if back else None) or krx(symbol)
+    return None

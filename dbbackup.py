@@ -6,12 +6,19 @@
   uv run dbbackup.py sync [백업폴더]               # dump + README.md·HISTORY.md 갱신 + git commit + push (run_skill.sh 끝에서 호출)
 
 형식: 표 하나 = 파일 하나, 행 하나 = 한 줄(JSON), 기본키 순 정렬. 그래서 git 은 바뀐 줄만 diff·압축한다.
+표 하나의 덤프가 40MB 를 넘으면(GitHub 은 파일 하나 100MB 초과 push 를 거부) <표>.s00.jsonl, .s01 … 로 나눈다 — 조각 수는 SHARDS.json 에 기록하고 줄이지 않으며,
+행은 기본키 해시로 조각이 정해져 행이 늘어도 기존 행은 제자리라 git diff 가 작다. restore·verify 는 조각 여부를 알아서 처리한다.
 기본 백업폴더: 환경변수 YT_BACKUP_DIR 또는 ~/yt-watcher-later-backup  (※ 공개 저장소가 아닌 별도 비공개 저장소 권장 — 개인 의견·시청 기록·자막 포함)
 """
-import datetime, json, os, pathlib, sqlite3, subprocess, sys
+import datetime, glob, json, math, os, pathlib, re, sqlite3, subprocess, sys, zlib
 import db as D
 
 DEFAULT = pathlib.Path(os.environ.get("YT_BACKUP_DIR", pathlib.Path.home() / "yt-watcher-later-backup"))
+
+# GitHub 는 파일 하나가 100MB 를 넘으면 push 를 거부한다(50MB 부터 경고). 표 하나가 이 크기에 다가가기 전에 미리 여러 파일로 나눈다.
+SHARD_AT = 40 * 1024 * 1024        # 표 하나의 덤프가 이 크기를 넘으면 조각으로 나누기 시작
+SHARD_TARGET = 25 * 1024 * 1024    # 조각 하나가 이 크기 안팎이 되도록 개수를 정한다(2의 거듭제곱)
+SHARD_FILE = "SHARDS.json"         # {표: 조각 수} — 조각 수는 줄이지 않는다(같은 행이 늘 같은 조각에 들어가야 git diff 가 작다)
 
 def _tables(con):
     return [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
@@ -31,16 +38,37 @@ def dump(out=None, con=None):
     ddl = [r[0] + ";" for r in con.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name")]
     (out / "schema.sql").write_text("\n".join(ddl) + "\n", encoding="utf-8")
     keep = {"schema.sql"}
+    marker = out / SHARD_FILE
+    try: shards = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+    except Exception: shards = {}
     for t in _tables(con):
-        cols, cur = _rows(con, t)
-        with open(out / f"{t}.jsonl", "w", encoding="utf-8", newline="\n") as f:
-            c = 0
-            for row in cur:
-                f.write(_line(cols, row) + "\n"); c += 1
-        n[t] = c; keep.add(f"{t}.jsonl")
-    for p in out.glob("*.jsonl"):                      # 없어진 표의 옛 파일 정리
+        cols, cur = _rows(con, t); pkn = [r[1] for r in sorted(con.execute(f"PRAGMA table_info({t})"), key=lambda r: r[5]) if r[5]]
+        lines = [(_line(cols, row), "|".join(str(row[cols.index(k)]) for k in pkn) if pkn else "") for row in cur]
+        size = sum(len(l.encode("utf-8")) + 1 for l, _ in lines)
+        k = max(shards.get(t, 1), 1 if size <= SHARD_AT else 2 ** math.ceil(math.log2(max(2, size / SHARD_TARGET))))
+        if k > 1: shards[t] = k
+        names = [f"{t}.jsonl"] if k == 1 else [f"{t}.s{i:02d}.jsonl" for i in range(k)]
+        bucket = {nm: [] for nm in names}
+        for l, key in lines: bucket[names[0] if k == 1 else names[zlib.crc32(key.encode("utf-8")) % k]].append(l)   # 기본키 해시로 조각을 정해 행이 늘어도 기존 행은 제자리
+        for nm in names:
+            with open(out / nm, "w", encoding="utf-8", newline="\n") as f:
+                for l in bucket[nm]: f.write(l + "\n")
+            keep.add(nm)
+        n[t] = len(lines)
+    if shards: marker.write_text(json.dumps(shards, ensure_ascii=False, sort_keys=True, indent=1) + "\n", encoding="utf-8")
+    for p in out.glob("*.jsonl"):                      # 없어진 표·옛 조각 구성의 파일 정리
         if p.name not in keep: p.unlink()
     return n
+
+def _files(src, t):
+    """표 t 의 덤프 파일들(조각 나뉨 여부와 무관)."""
+    src = pathlib.Path(src); one = src / f"{t}.jsonl"
+    return [one] if one.exists() else sorted(src.glob(f"{t}.s[0-9][0-9].jsonl"))
+
+def _read(src, t):
+    out = []
+    for p in _files(src, t): out += [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return out
 
 def restore(src, dest):
     src, dest = pathlib.Path(src), pathlib.Path(dest)
@@ -49,14 +77,11 @@ def restore(src, dest):
     con = sqlite3.connect(dest); n = {}
     con.executescript((src / "schema.sql").read_text(encoding="utf-8"))
     for t in _tables(con):
-        p = src / f"{t}.jsonl"
-        if not p.exists(): continue
+        if not _files(src, t): continue
         c = 0
-        with open(p, encoding="utf-8") as f:
-            for ln in f:
-                if not ln.strip(): continue
-                d = json.loads(ln); ks = list(d)
-                con.execute(f"INSERT INTO {t}({','.join(ks)}) VALUES({','.join('?' * len(ks))})", [d[k] for k in ks]); c += 1
+        for ln in _read(src, t):
+            d = json.loads(ln); ks = list(d)
+            con.execute(f"INSERT INTO {t}({','.join(ks)}) VALUES({','.join('?' * len(ks))})", [d[k] for k in ks]); c += 1
         n[t] = c
     con.commit(); con.close()
     return n
@@ -64,9 +89,10 @@ def restore(src, dest):
 def verify(src=None):
     src = pathlib.Path(src or DEFAULT); con = sqlite3.connect(D.DB_PATH); bad = []
     for t in _tables(con):
-        cols, cur = _rows(con, t); p = src / f"{t}.jsonl"
-        have = p.read_text(encoding="utf-8").splitlines() if p.exists() else None
+        cols, cur = _rows(con, t); fs = _files(src, t)
+        have = _read(src, t) if fs else None
         now = [_line(cols, r) for r in cur]
+        if have is not None and len(fs) > 1: have = sorted(have); now = sorted(now)     # 조각으로 나뉜 표는 순서 대신 내용만 비교
         if have != now: bad.append(f"{t}: DB {len(now)}행 / 백업 {'없음' if have is None else len(have)}행" + ("" if have is None or len(have) != len(now) else " (내용 다름)"))
     return bad
 
@@ -94,6 +120,7 @@ README = """# yt-watcher-later DB 백업
 ## 파일 구성
 - `schema.sql` — 표·인덱스 정의
 - `<표>.jsonl` — 표마다 한 파일, 행 하나가 한 줄(JSON), 기본키 순 정렬. 같은 DB 면 항상 같은 내용이라 git 에는 **바뀐 줄만** 기록됩니다.
+- `<표>.sNN.jsonl`, `SHARDS.json` — 표 하나가 40MB 를 넘으면 자동으로 여러 조각으로 나눕니다(GitHub 파일 100MB 한도 대비). 복구·검증은 조각을 자동으로 합칩니다.
 - `HISTORY.md` — 백업할 때마다 한 줄 추가(언제, 몇 행, 무엇이 바뀌었는지)
 
 ## 언제 갱신되나
@@ -116,7 +143,7 @@ def sync(out=None):
     if not (out / ".git").exists(): return "백업 폴더가 git 저장소가 아니어서 commit/push 생략"
     n = dump(out); now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st = _git(out, "status", "--porcelain", "--", "*.jsonl", "schema.sql").stdout.split("\n")
-    changed = sorted({ln[3:].rsplit(".jsonl", 1)[0] for ln in st if ln.strip().endswith((".jsonl", "schema.sql"))})
+    changed = sorted({re.sub(r"\.s\d\d$", "", ln[3:].rsplit(".jsonl", 1)[0]) for ln in st if ln.strip().endswith((".jsonl", "schema.sql"))})
     stat = _git(out, "diff", "--numstat", "HEAD", "--", "*.jsonl").stdout.split("\n")   # 줄 단위 변경량(추가/삭제)
     add = sum(int(p[0]) for p in (l.split("\t") for l in stat if l) if p[0].isdigit()); dele = sum(int(p[1]) for p in (l.split("\t") for l in stat if l) if p[1].isdigit())
     ch = (", ".join(changed) + f" (+{add}/-{dele}줄)") if changed else "변경 없음"
@@ -131,6 +158,8 @@ def sync(out=None):
     r = _git(out, "commit", "-q", "-m", f"DB 백업 {now}: {ch}")
     if r.returncode: return f"commit 실패: {(r.stderr or r.stdout).strip()[:200]}"
     msg = f"commit 완료 ({ch})"
+    try: _git(out, "gc", "--quiet", timeout=600)      # commit 직후 파일은 통째로(느슨한 객체) 저장돼 있다 — gc 로 묶어야 바뀐 줄만 델타로 압축된다(실측 50MB → 6MB)
+    except Exception: pass
     try: p = _git(out, "push", timeout=600)
     except subprocess.TimeoutExpired: return msg + " / push 시간 초과(다음 실행에서 재시도)"
     return msg + (" / push 완료" if p.returncode == 0 else f" / push 실패(다음 실행에서 재시도): {(p.stderr or p.stdout).strip()[-200:]}")
