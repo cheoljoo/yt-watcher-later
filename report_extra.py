@@ -111,11 +111,12 @@ def _stale(vd):
     try: return (datetime.date.today() - datetime.date.fromisoformat((vd or "")[:10])).days > 90
     except Exception: return False
 
-def _ind_card(i, v, srcs):
+def _ind_card(i, v, srcs, count=True):
     sig = f"{SIG_ICON.get(v['signal'], '')} <b>{SIG_TXT.get(v['signal'], '')}</b> {e(v['signal_reason'] or '')}" if v["signal"] else ""
     arrow = {"up": "▲", "down": "▼", "flat": "▬"}.get(v["direction"], "·")
     chg = f" ({v['change_pct']:+.2f}%)" if v["change_pct"] is not None else ""
-    h = f"<tr><td><b>{e(i['name'])}</b><br><span class=meta>{e(i['category'] or '')}{' · ⭐' if i['importance'] == 'high' else ''}</span>"
+    import indfilter as F
+    h = f"<tr {F.attrs(i, count)}><td><b>{e(i['name'])}</b><br><span class=meta>{e(i['category'] or '')}{' · ⭐' if i['importance'] == 'high' else ''}</span>"
     h += f"<td>{arrow} {e(v['value_text'] or _fmt(v['value']))}{e(chg)}<br><span class=meta>{'🕰️ 오래된 값 · ' if _stale(v['value_date']) else ''}기준일 {e(v['value_date'] or '-')}; 직전 {_fmt(v['prev_value'])}</span>"
     h += f"<td>{sig or '<span class=meta>변화 없음</span>'}<br>{e(v['meaning'] or '')}{(" <span class=meta>🤖 " + e(v['llm']) + "</span>") if v['llm'] and v['meaning'] else ''}"
     h += f"<td><details><summary>설명·해석·기준값 <span class=meta>🤖 {e(i['enrich_llm'] or '-')}</span></summary><p>{e(i['description'] or '')}</p><p><b>해석</b> {e(i['interpretation'] or '')}</p><p><b>기준(평균/균형)</b> {e(i['baseline'] or '')}</p>"
@@ -143,7 +144,8 @@ def seed_pending_block(con):
     import indicator_seed as S
     names = [s["name"] for s in S.SEED if s["source"] == "none"]
     if not names: return ""
-    items = "".join(f"<li><b>{e(r['name'])}</b> <span class=meta>{e(r['category'] or '')}</span></li>" for r in con.execute(f"SELECT name,category FROM indicators WHERE name IN ({','.join('?' * len(names))}) ORDER BY category,name", names))
+    import indfilter as F
+    items = "".join(f"<li {F.attrs({'name': r['name'], 'category': r['category'], 'source': 'none', 'symbol': ''}, False)}><b>{e(r['name'])}</b> <span class=meta>{e(r['category'] or '')}</span></li>" for r in con.execute(f"SELECT name,category FROM indicators WHERE name IN ({','.join('?' * len(names))}) ORDER BY category,name", names))
     return f"<section class=card><h3>📭 값이 아직 없는 기본 지표 ({len(names)})</h3><p class=meta>공식 OpenAPI 인증키(한국부동산원 R-ONE·한국은행 ECOS·국토교통부)나 유료 컨센서스가 있어야 자동 수집할 수 있어 아직 연결되지 않았습니다. 지표 정의는 DB에 등록돼 있습니다.</p><ul>{items}</ul></section>"
 
 def build_indicators(con):
@@ -158,13 +160,29 @@ def build_indicators(con):
     body += pbr_block(con)
     head = "<table class=num><tr><th>지표<th>값 / 전일 대비 · 1주 추세<th>신호 · 의미<th>설명</tr>"
     changed = sorted([r for r in rows if r["signal"]], key=lambda r: ["warning", "threshold", "direction"].index(r["signal"]))
-    body += f"<section class='card due'><h3>🚨 {e(last)} 변화·경고 ({len(changed)})</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만</p>"
-    body += (head + "".join(_ind_card(r, r, srcs(r["id"])) for r in changed) + "</table>") if changed else "<p class=meta>오늘은 해당 항목이 없습니다.</p>"
+    import indfilter as F
+    from report import CAT_ICON as CI
+    body += F.BAR
+    body += f"<section class='card due' id=sec-chg><h3>🚨 {e(last)} 변화·경고 (<span data-count-of=sec-chg>{len(changed)}</span>)</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만 · 위의 국가·분류 선택이 여기에도 적용됩니다</p>"
+    body += (head + "".join(_ind_card(r, r, srcs(r["id"]), False) for r in changed) + "</table>") if changed else "<p class=meta>오늘은 해당 항목이 없습니다.</p>"
     body += "</section>"
-    body += f"<section class=card><h3>📋 전체 지표·종목 ({len(rows)}) — 위 항목 포함</h3>{head}{''.join(_ind_card(r, r, srcs(r['id'])) for r in rows)}</table></section>"
+    rows = sorted(rows, key=lambda r: F.sort_key(r) + (r["importance"] != "high", r["name"]))
+    ck, ckc, tr_ = {}, {}, ""
+    for r in rows:
+        k, c = F.country_of(r), r["category"] or "기타"
+        ck[k] = ck.get(k, 0) + 1; ckc[(k, c)] = ckc.get((k, c), 0) + 1
+    cur = None
+    for r in rows:
+        k, c = F.country_of(r), r["category"] or "기타"
+        if cur is None or cur[0] != k: tr_ += F.row_head(k, f"{F.CNAME[k]} ({ck[k]})")
+        if cur != (k, c): tr_ += F.row_head(f"{k}|{e(c)}", f"&nbsp;&nbsp;{CI.get(c, '📌')} {e(c)} ({ckc[(k, c)]})")
+        cur = (k, c); tr_ += _ind_card(r, r, srcs(r["id"]))
+    body += f"<section class=card id=sec-all><h3>📋 전체 지표·종목 (<span data-count-of=sec-all>{len(rows)}</span>) — 위 항목 포함</h3>{head}{tr_}</table></section>"
     body += seed_pending_block(con)
     pend = con.execute("SELECT count(*) FROM indicators WHERE active=1").fetchone()[0]
     body += f"<p class=meta>등록된 지표 {pend}개 · 값을 구하지 못한 지표는 그날 건너뜁니다 · 값은 모델이 아는 최근 값이며 실시간이 아닙니다(🕰️ 표시는 기준일이 90일 넘게 오래된 값 — 경고도 참고용으로만 볼 것).</p>"
+    import indfilter as F
+    body += F.js()
     (OUT / "indicators.html").write_text(page("지표 대시보드", body, "📊"), encoding="utf-8")
 
 def build(con):

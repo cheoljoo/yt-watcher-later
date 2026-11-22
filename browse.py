@@ -21,6 +21,10 @@ var items=[].slice.call(document.querySelectorAll('.bi')),box=document.getElemen
  fT=document.getElementById('f-topic'),fR=document.getElementById('f-recent'),fO=document.getElementById('f-sort'),fA=document.getElementById('f-act'),fS=document.getElementById('f-star'),fT2=document.getElementById('f-script'),fP=document.getElementById('f-per'),
  info=document.getElementById('bi-info'),pg=[document.getElementById('pg-top'),document.getElementById('pg-bot')],page=1,view=[];
 function cutoff(days){var d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10)}
+// 주제 드롭다운에 '(해당 주제 전체)-오늘 처리된 수' 표시: 정치·사회 (6)-2. 오늘 = 보는 기기의 날짜, 기준 = 처리날짜(data-p)
+function localDay(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
+(function(){var td=localDay(),cc={},ss={};items.forEach(function(x){if((x.dataset.p||'').slice(0,10)!==td)return;cc[x.dataset.c]=(cc[x.dataset.c]||0)+1;ss[x.dataset.s]=(ss[x.dataset.s]||0)+1});
+ [].slice.call(fT.options).forEach(function(o){var k=o.value.slice(0,2),v=o.value.slice(2);if(k!=='c:'&&k!=='s:')return;o.textContent=o.textContent+'-'+((k==='c:'?cc[v]:ss[v])||0)})})();
 function has(x,sel){return !!x.querySelector(sel)}
 function sortKey(x,m){return m[0]==='u'?x.dataset.d:x.dataset.p}
 function apply(){var t=fT.value,r=fR.value,co=r==='all'?'':cutoff(+r),a=fA.value,st=fS.value,sc=fT2.value;
@@ -76,7 +80,7 @@ def build(con=None):
     cards = "".join(
         f"<div class=bi data-i={i} data-t='{'ok' if v['transcript_status'] == 'ok' or (v['transcript_status'] is None and v['transcript']) else 'fail'}' data-p='{e(v['processed_at'] or v['processed_date'] or '')}' data-d='{e(v['upload_date'] or '0000-00-00')}' data-c='{e(v['category'] or '기타')}' data-s='{e((v['category'] or '기타') + '/' + (v['subtag'] or '기타'))}' hidden>{R.card(con, v)}</div>"
         for i, v in enumerate(vs))
-    body = (f"<h1>🗂️ 날짜·주제별 보기</h1><p class=meta>분석한 영상 {len(vs)}개 · YouTube 정렬 기준(업로드/처리날짜)별로 같은 날 영상끼리 묶어 1일 리포트 형식으로 보여 줍니다 · <a href='index.html'>🏠 홈</a></p>"
+    body = (f"<h1>🗂️ 날짜·주제별 보기</h1><p class=meta>분석한 영상 {len(vs)}개 · YouTube 정렬 기준(업로드/처리날짜)별로 같은 날 영상끼리 묶어 1일 리포트 형식으로 보여 줍니다 · 주제 옆 <b>(전체)-N</b> 은 오늘 처리된 영상 수 · <a href='index.html'>🏠 홈</a></p>"
             f"<div class=bar id=bi-top><label>🏷️ 주제 <select id=f-topic>{topic}</select></label>"
             f"<label>📅 기간 <select id=f-recent>{recent}</select></label>"
             f"<label>↕️ 정렬 <select id=f-sort>{sort}</select></label>"

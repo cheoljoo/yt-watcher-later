@@ -95,7 +95,8 @@ def build(con):
     for r in con.execute("SELECT * FROM indicator_values WHERE value IS NOT NULL ORDER BY date"):
         if r["indicator_id"] in inds: series.setdefault(r["indicator_id"], []).append(r)
     ser = [{"id": i, "name": inds[i]["name"], "ind": inds[i], "rows": rs, "pts": [(r["date"], r["value"]) for r in rs]} for i, rs in series.items()]
-    ser.sort(key=lambda s: (s["ind"]["category"] or "~", s["ind"]["importance"] != "high", s["name"]))
+    import indfilter as F
+    ser.sort(key=lambda s: F.sort_key(s["ind"]) + (s["ind"]["importance"] != "high", s["name"]))
     days = sorted({d for s in ser for d, _ in s["pts"]})
     body = (f"<h1>📉 지표 추이</h1><p class=meta>날짜별로 DB에 쌓인 지표 값({days[0] if days else '-'} ~ {days[-1] if days else '-'}, {len(days)}일치) · 지표 {len(ser)}개 · "
             "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='index.html'>🏠 홈</a></p>")
@@ -103,17 +104,24 @@ def build(con):
     mac = con.execute("SELECT date, phase_index FROM macro_daily ORDER BY date").fetchall()
     phase_days = {m["date"] for a, m in zip(mac, mac[1:]) if a["phase_index"] != m["phase_index"]}
     body += "<p class=meta>범례: <span style='color:#c0392b'>●</span> 붉은 큰 점 = 중요한 날(경고·임계값·방향 전환 신호, 또는 전일 대비 ±3% 이상) · <span style='color:#7b5ea7'>▮</span> 보라색 띠 = 매크로 위치가 바뀐 날 · 점에 마우스를 올리면 이유가 보입니다</p>"
-    cat = None
+    body += F.BAR
+    cnt_k, cnt_kc = {}, {}
     for s in ser:
-        c = s["ind"]["category"] or "기타"
-        if c != cat:
-            cat = c; body += f"<h2 class=cat-h>{CAT_ICON.get(c, '📌')} {e(c)}</h2>"
+        k, c = F.country_of(s["ind"]), s["ind"]["category"] or "기타"
+        cnt_k[k] = cnt_k.get(k, 0) + 1; cnt_kc[(k, c)] = cnt_kc.get((k, c), 0) + 1
+    cur = None
+    for s in ser:
+        k, c = F.country_of(s["ind"]), s["ind"]["category"] or "기타"
+        if k != cur[0] if cur else True: body += F.head_country(k, cnt_k[k])
+        if cur != (k, c): body += F.head_cat(k, c, CAT_ICON.get(c, "📌"), cnt_kc[(k, c)])
+        cur = (k, c)
         last = s["rows"][-1]
         star = "⭐ " if s["ind"]["importance"] == "high" else ""
         km = key_days(s["rows"])
-        body += (f"<section class='card vc' id='i-{s['id']}'><h3>{star}{e(s['name'])}</h3>{chart(s['pts'], s['ind']['warn_low'], s['ind']['warn_high'], km, phase_days)}"
+        body += (f"<section {F.attrs(s['ind'], cls='card vc')} id='i-{s['id']}'><h3>{star}{e(s['name'])}</h3>{chart(s['pts'], s['ind']['warn_low'], s['ind']['warn_high'], km, phase_days)}"
                  f"<p>{e(explain(s['name'], s['ind']['unit'], s['pts'], s['rows'], s['ind']))}</p>")
         if km: body += "<p><b>🔴 중요한 날</b></p><ul>" + "".join(f"<li><b>{d}</b> {e(w)}" for d, w in km.items()) + "</ul>"
         if last["meaning"]: body += f"<p class=meta>🤖 AI 해설({e(last['llm'] or '-')}, {last['date']}): {e(last['meaning'])}</p>"
         body += "</section>"
+    body += F.js()
     (OUT / "indicator_trends.html").write_text(page("지표 추이", body, "📉"), encoding="utf-8")
