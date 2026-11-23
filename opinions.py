@@ -141,17 +141,18 @@ def box(con, vid):
                 f"{'⭐ 인상 깊은 영상 (별표됨)' if son else '☆ 인상 깊은 영상'}</button> <span class='act-msg meta'></span>"
                 f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a><a class=meta href='highlights.html' style='margin-left:8px'>인상 깊은 영상 ›</a></div>")
 
-LIST_CSS = """<style>
-.bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);padding:10px 0;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
-.bar label{font-size:13px;color:var(--mu)}.bar select{font:inherit;margin-left:4px;padding:4px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg)}
-.pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}.pager button{font:inherit;padding:3px 11px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);cursor:pointer}
-.pager button.on{background:var(--ac);color:#fff;border-color:var(--ac)}.pager button:disabled{opacity:.4;cursor:default}
-details.oi{border:1px solid var(--bd);border-radius:12px;padding:8px 12px;margin:10px 0;background:var(--card)}
+OI_CSS_BODY = """details.oi{border:1px solid var(--bd);border-radius:12px;padding:8px 12px;margin:10px 0;background:var(--card)}
 details.oi>summary{cursor:pointer;list-style:none}details.oi>summary::-webkit-details-marker{display:none}
 details.oi>summary b.t{font-size:15px}.cl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;font-size:13.5px;margin-top:3px}
 .cl.ai{color:var(--mu)}details.oi[open]>summary .cl{display:none}
 .bd{display:inline-block;font-size:12px;border-radius:99px;padding:0 9px;margin-left:6px;background:var(--chip)}.bd.ok{background:var(--ac);color:#fff}
-</style>"""
+"""
+LIST_CSS = ("""<style>
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);padding:10px 0;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.bar label{font-size:13px;color:var(--mu)}.bar select{font:inherit;margin-left:4px;padding:4px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg)}
+.pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}.pager button{font:inherit;padding:3px 11px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);cursor:pointer}
+.pager button.on{background:var(--ac);color:#fff;border-color:var(--ac)}.pager button:disabled{opacity:.4;cursor:default}
+""" + OI_CSS_BODY + "</style>")
 
 LIST_JS = """<script>(function(){
 var items=[].slice.call(document.querySelectorAll('.oi')),box=document.getElementById('oi-list'),
@@ -178,6 +179,31 @@ def _head(text, n=110):
     t = " ".join((text or "").split())
     return t[:n] + ("…" if len(t) > n else "")
 
+def _item(r, filt=True, tag=""):
+    """의견 한 항목(접힌 details). filt=True 이면 목록 페이지용 필터 속성과 hidden 을 붙인다."""
+    has = bool(r["ai_reply"])
+    attrs = (f" hidden data-ai={1 if has else 0} data-d='{e((r['my_at'] or '0000')[:10])}' data-c='{e(r['category'] or '기타')}' data-s='{e((r['category'] or '기타') + '/' + (r['subtag'] or '기타'))}'") if filt else ""
+    return (f"<details class=oi{attrs}>"
+            f"<summary><b class=t><span class=no></span>{e(r['title'])}</b><span class='bd{' ok' if has else ''}'>{'🤖 AI 의견 있음' if has else '⏳ AI 의견 대기'}</span> {tag}<span class=meta>{e((r['my_at'] or '')[:10])}</span>"
+            f"<div class=cl>💬 {e(_head(r['my_opinion']))}</div>" + (f"<div class='cl ai'>🤖 {e(_head(r['ai_reply']))}</div>" if has else "") + "</summary>"
+            f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{e(r['page'])}.html#v-{e(r['video_id'])}'>영상 카드로 가기 ›</a></div>"
+            f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>"
+            + (f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
+               if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + "</details>")
+
+
+def day_block(con, day, vids=()):
+    """홈 '어제 확인한 항목' 아래: 그날 AI 의견이 달린 것 + 그날 확인한 항목의 영상에 남긴 의견. 없으면 빈 문자열."""
+    vids = [v for v in vids if v]
+    q = ("SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id "
+         "WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (substr(o.ai_at,1,10)=?" + (f" OR o.video_id IN ({','.join('?' * len(vids))})" if vids else "") + ") ORDER BY o.ai_at DESC, o.my_at DESC")
+    rows = con.execute(q, (day, *vids)).fetchall()
+    if not rows: return ""
+    items = "".join(_item(r, False, "<span class=meta>[어제 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[어제 확인한 항목의 영상]</span> ") for r in rows)
+    return (f"<h4 style='margin:18px 0 4px'>💬 나와 AI 의견 ({len(rows)})</h4><p class=meta>어제({e(day)}) AI 의견이 달린 것과, 어제 확인한 항목의 영상에 남긴 내 의견입니다. 눌러서 펼치세요. <a href='opinions.html'>전체 보기 ›</a></p>"
+            f"<style>{OI_CSS_BODY}</style>{items}")
+
+
 def build(con):
     """'나와 AI 의견' 페이지. 날짜·주제별 보기와 같은 선택(주제·기간·한 페이지 수) + AI 의견 있음/없음. 항목은 접힌 상태(summary=처음 부분)."""
     import report as R
@@ -196,16 +222,7 @@ def build(con):
     recent = "<option value=all>모두</option>" + "".join(f"<option value={d}>{t}</option>" for d, t in ((7, "최근 1주일"), (30, "최근 1개월"), (90, "최근 3개월"), (180, "최근 6개월"), (365, "최근 1년"), (730, "최근 2년")))
     per = "".join(f"<option value={n}>{n}개</option>" for n in (20, 50, 100))
     ai = f"<option value=all>모두 ({len(rows)})</option><option value=yes>AI 의견 있는 것 ({n_ai})</option><option value=no>AI 의견 없는 것 ({len(rows) - n_ai})</option>"
-    items = ""
-    for r in rows:
-        has = bool(r["ai_reply"])
-        items += (f"<details class=oi hidden data-ai={1 if has else 0} data-d='{e((r['my_at'] or '0000')[:10])}' data-c='{e(r['category'] or '기타')}' data-s='{e((r['category'] or '기타') + '/' + (r['subtag'] or '기타'))}'>"
-                  f"<summary><b class=t><span class=no></span>{e(r['title'])}</b><span class='bd{' ok' if has else ''}'>{'🤖 AI 의견 있음' if has else '⏳ AI 의견 대기'}</span> <span class=meta>{e((r['my_at'] or '')[:10])}</span>"
-                  f"<div class=cl>💬 {e(_head(r['my_opinion']))}</div>" + (f"<div class='cl ai'>🤖 {e(_head(r['ai_reply']))}</div>" if has else "") + "</summary>"
-                  f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{e(r['page'])}.html#v-{e(r['video_id'])}'>영상 카드로 가기 ›</a></div>"
-                  f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>"
-                  + (f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
-                     if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + "</details>")
+    items = "".join(_item(r) for r in rows)
     body = (f"<h1>💬 나와 AI 의견</h1><p class=meta>내가 남긴 의견 {len(rows)}개 · AI 의견 달림 {n_ai}개 · 대기 {len(rows) - n_ai}개 · 내가 저장한 날짜 최신순 · 항목을 누르면 펼쳐집니다 · <a href='index.html'>🏠 홈</a> · 의견은 각 날짜 리포트나 <a href='browse.html'>🗂️ 날짜·주제별 보기</a>의 영상 카드 맨 아래에서 씁니다</p>")
     if not rows: body += "<p class=meta>아직 남긴 의견이 없습니다. 영상 카드 맨 아래 칸에 의견을 적고 저장하면 여기에 나타납니다.</p>"
     body += (f"<div class=bar><label>🤖 AI 의견 <select id=f-ai>{ai}</select></label><label>🏷️ 주제 <select id=f-topic>{topic}</select></label>"

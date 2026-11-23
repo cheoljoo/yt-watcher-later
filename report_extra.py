@@ -3,7 +3,7 @@ import math
 from html import escape as e
 import db as D
 from indicators import CYCLE
-from report import page, OUT, ST_ICON, KIND_ICON, CAT_ICON
+from report import page, OUT, ST_ICON, KIND_ICON, CAT_ICON, CAT_ORDER
 
 SIG_ICON = {"warning": "🚨", "threshold": "⚠️", "direction": "🔄"}
 SIG_TXT = {"warning": "경고", "threshold": "임계값", "direction": "방향 전환"}
@@ -59,18 +59,19 @@ def _light(c):
     if c["status"] in LIGHT: return LIGHT[c["status"]]
     return ("🟠", "확인 필요") if c["check_date"] <= D.today() else ("⏳", "대기")
 
-def _rows(rows, done=None):
+def _rows(rows, done=None, filt=False):
     """확인 항목 표 — 대기/완료 모두 같은 열: 신호등, 확인일, 대상, 예상, 출처 영상, 확인한 날·결과·의견."""
-    h = "<table class=num><tr><th>신호<th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>🎬 출처 영상<th>✅ 확인한 날 · 결과 · 의견</tr>"
+    h = f"<table class=num{' id=ck' if filt else ''}><tr><th>신호<th>📅 확인일<th>🎯 대상<th>🔎 확인할 것 / 영상의 예상<th>🎬 출처 영상<th>✅ 확인한 날 · 결과 · 의견</tr>"
     for c in rows:
         ic, tx = _light(c)
         if c["checked_at"]:
             res = f"<b>{e(c['checked_at'][:10])}</b><br>{e(c['result'] or '')}{('<br><span class=meta>📈 업로드→확인일 변화: ' + e(c['since_upload']) + '</span>') if c['since_upload'] else ''}<br><i>{e(c['opinion'] or '')}</i> <span class=meta>{e(c['reason'] or '')}</span>"
         else: res = "<span class=meta>아직 확인 전</span>" + (f"<br><span class=meta>{e(c['reason'])}</span>" if c["reason"] else "")
-        h += f"<tr><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>근거: ' + e(c['rationale']) + '</span>') if c['rationale'] else ''}{('<br><span class=meta>🟢 예상이 맞을 때: ' + e(c['if_right']) + '</span>') if c['if_right'] else ''}{('<br><span class=meta>🔴 예상이 틀릴 때: ' + e(c['if_wrong']) + '</span>') if c['if_wrong'] else ''}<td>{_vlink(c)}<td>{res}</tr>"
+        at = (f" hidden data-st='{e(c['status'])}' data-d='{e((c['checked_at'] or '')[:10])}' data-c='{e(c['category'] or '기타')}' data-s='{e((c['category'] or '기타') + '/' + (c['subtag'] or '기타'))}'") if filt else ""
+        h += f"<tr{at}><td style='text-align:center;font-size:20px' title='{tx}'>{ic}<br><span class=meta style='font-size:11px'>{tx}</span><td>{e(c['check_date'])}<td>{KIND_ICON.get(c['kind'], '')} {e(c['target'])}<td>{e(c['what_to_check'])}<br><span class=meta>예상: {e(c['expectation'])}</span>{('<br><span class=meta>근거: ' + e(c['rationale']) + '</span>') if c['rationale'] else ''}{('<br><span class=meta>🟢 예상이 맞을 때: ' + e(c['if_right']) + '</span>') if c['if_right'] else ''}{('<br><span class=meta>🔴 예상이 틀릴 때: ' + e(c['if_wrong']) + '</span>') if c['if_wrong'] else ''}<td>{_vlink(c)}<td>{res}</tr>"
     return h + "</table>"
 
-SEL = "SELECT c.*, v.title, COALESCE(v.run_id, v.processed_date) AS processed_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id"
+SEL = "SELECT c.*, v.title, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS processed_date FROM checks c LEFT JOIN videos v ON v.id=c.video_id"
 
 def _count_table(con, only_pending):
     """확인 항목 상태별 개수 표 (⏳ 대기 페이지는 대기·전체, ✅ 확인한 것 페이지는 판정별 개수)."""
@@ -83,6 +84,38 @@ def _count_table(con, only_pending):
     if not only_pending: rows += f"<tr><td>확인한 것 합계<td align=right>{total - n.get('pending', 0):,}개</tr>"
     return f"<section class=card><h3>🔢 개수</h3><table>{rows}</table></section>"
 
+def _done_filter(dn):
+    """확인한 것 페이지의 선택 칸(주제·신호·기간). 옵션 글자 뒤의 '(개수)-오늘 확인된 개수' 는 JS 가 붙인다."""
+    cats, subs = {}, {}
+    for r in dn:
+        c, sb = r["category"] or "기타", r["subtag"] or "기타"
+        cats[c] = cats.get(c, 0) + 1; subs.setdefault(c, {})[sb] = subs.setdefault(c, {}).get(sb, 0) + 1
+    order = sorted(cats, key=lambda c: CAT_ORDER.index(c) if c in CAT_ORDER else len(CAT_ORDER))
+    opt = lambda v, label: f"<option value='{e(str(v))}' data-l='{e(label)}'>{e(label)}</option>"
+    topic = opt("all", "모두")
+    for c in order:
+        topic += opt(f"c:{c}", f"{CAT_ICON.get(c, '📌')} {c}")
+        for sb in sorted(subs[c], key=lambda k: (-subs[c][k], k)): topic += opt(f"s:{c}/{sb}", f"\u00a0\u00a0└ {sb}")
+    sig = opt("all", "모두") + "".join(opt(k, f"{ic} {tx}") for k, (ic, tx) in LIGHT.items())
+    rec = opt("all", "모두") + "".join(opt(d, t) for d, t in ((0, "오늘"), (7, "최근 1주일"), (30, "최근 1개월"), (90, "최근 3개월"), (180, "최근 6개월"), (365, "최근 1년")))
+    return (f"<div class=bar><label>🏷️ 주제 <select class=fk data-k=t id=f-topic>{topic}</select></label><label>🚦 신호 <select class=fk data-k=s id=f-sig>{sig}</select></label>"
+            f"<label>📅 기간(확인한 날) <select class=fk data-k=r id=f-recent>{rec}</select></label></div>")
+
+_DONE_JS = """<script>(function(){
+var rows=[].slice.call(document.querySelectorAll('#ck tr[data-st]')),sels=[].slice.call(document.querySelectorAll('select.fk')),info=document.getElementById('ck-info');
+function ymd(d){return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
+var td=ymd(new Date());
+function co(v){var d=new Date();d.setDate(d.getDate()-(+v));return ymd(d)}
+function match(x,k,v){if(v==='all')return true;
+ if(k==='t'){var p=v.slice(0,2),q=v.slice(2);return p==='c:'?x.dataset.c===q:x.dataset.s===q}
+ if(k==='s')return x.dataset.st===v;
+ return x.dataset.d>=co(v)}
+sels.forEach(function(s){var k=s.dataset.k;[].forEach.call(s.options,function(o){var n=0,m=0;rows.forEach(function(x){if(match(x,k,o.value)){n++;if(x.dataset.d===td)m++}});o.textContent=o.dataset.l+' ('+n+')-'+m})});
+function apply(){var n=0;rows.forEach(function(x){var ok=sels.every(function(s){return match(x,s.dataset.k,s.value)});x.hidden=!ok;if(ok)n++});
+ info.textContent='조건에 맞는 항목 '+n+'개 / 전체 '+rows.length+'개'}
+sels.forEach(function(s){s.onchange=apply});apply()})();
+</script>"""
+
 def build_checks(con):
     today = D.today()
     pend = con.execute(SEL + " WHERE c.status='pending' ORDER BY c.check_date, c.id").fetchall()
@@ -93,12 +126,12 @@ def build_checks(con):
     body += _count_table(con, True)
     (OUT / "checks_pending.html").write_text(page("앞으로 확인할 것", body, "⏳"), encoding="utf-8")
     dn = con.execute(SEL + " WHERE c.status!='pending' ORDER BY c.checked_at DESC, c.id").fetchall()
-    tdy = [c for c in dn if (c["checked_at"] or "").startswith(today)]
-    body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 오늘 확인한 것이 맨 앞, 그 아래에 오늘 것을 포함한 전체를 시간순으로 · <a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
-    body += f"<section class='card'><h3>🆕 오늘({today}) 확인한 것 ({len(tdy)})</h3>{_rows(tdy) if tdy else '<p class=meta>오늘 확인한 항목이 없습니다. <code>uv run check.py set ID --status ...</code> 로 기록합니다.</p>'}</section>"
-    body += f"<section class=card><h3>🗓️ 전체 (확인한 순서, 오래된 것부터)</h3>{_rows(sorted(dn, key=lambda c: (c['checked_at'] or '', c['id']))) if dn else '<p class=meta>아직 없습니다.</p>'}</section>"
+    body = f"<h1>✅ 확인한 것</h1><p class=meta>확인 {len(dn)}개 · 확인한 날짜 최신순 · 선택 칸 옆 숫자는 (해당 개수)-오늘 확인된 개수 · <a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>‹ 앞으로 확인할 것</a></p>" + LEGEND
+    body += _done_filter(dn)
+    body += f"<p class=meta id=ck-info></p><section class=card>{_rows(dn, filt=True) if dn else '<p class=meta>아직 없습니다.</p>'}</section>"
     body += _count_table(con, False)
-    (OUT / "checks_done.html").write_text(page("확인한 것", body, "✅"), encoding="utf-8")
+    import opinions as OPN
+    (OUT / "checks_done.html").write_text(page("확인한 것", OPN.LIST_CSS + body + _DONE_JS, "✅"), encoding="utf-8")
 
 def _fmt(v): return "-" if v is None else (f"{v:,.2f}".rstrip("0").rstrip("."))
 
