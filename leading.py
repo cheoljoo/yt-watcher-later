@@ -6,7 +6,7 @@
   uv run leading_fetch.py     # 시계열 새로 받기 (월 1회쯤이면 충분)
   uv run leading.py           # reports/leading.html 만들기 (report.build_all 도 호출)
 """
-import json, math, statistics, sys
+import datetime, json, math, statistics, sys
 from html import escape as e
 import db as D
 import leading_fetch as F
@@ -302,8 +302,100 @@ svg text{font-family:system-ui,'Noto Sans KR',sans-serif}
 .gauge{margin:10px 0 4px}.gz{position:relative;height:12px;border-radius:6px;background:linear-gradient(90deg,#c0392b,#d9a82b 50%,#1a8a4a)}.gz span{position:absolute;top:-5px;width:6px;height:22px;background:var(--fg);border-radius:3px;transform:translateX(-3px)}
 .gl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mu)}ul.acts li{margin:4px 0;font-size:14.5px}
 .chain .bd circle{stroke:var(--card);stroke-width:2}.chain .bd text{font-size:15px;font-weight:700;fill:#fff}.chain .bd.up circle{fill:#1a8a4a}.chain .bd.down circle{fill:#c0392b}.chain .bd.flat circle{fill:#7a7a74}
+.lg{width:100%;min-width:700px;height:auto;display:block;background:var(--card);border:1px solid var(--bd);border-radius:8px}.lg .t{font-size:13px;fill:var(--fg)}.lg .m{font-size:11.5px;fill:var(--mu)}.lg .bl{font-size:12px;font-weight:700;fill:#fff}
+.lg .gr{stroke:var(--bd);stroke-width:1}.lg .wt{fill:var(--c2)}.lg .ok{fill:#1a8a4a}.lg .blind{fill:var(--mu);opacity:.38}.lgx{font-size:14.5px;margin:8px 0 16px}
 .tag{font-size:11.5px;background:var(--chip);border-radius:6px;padding:1px 6px;color:var(--mu)}
 """
+
+
+def eun(w):
+    """단어 뒤에 붙일 은/는 (받침 있으면 은). 마지막이 한글이 아니면 '는'."""
+    c = w.rstrip(")] ")[-1:] if w else ""
+    return "은" if c and "가" <= c <= "힣" and (ord(c) - 0xAC00) % 28 else "는"
+
+
+def _month_end(m):
+    y, mo = int(m[:4]), int(m[5:7]); nx = datetime.date(y + (mo == 12), mo % 12 + 1, 1)
+    return nx - datetime.timedelta(days=1)
+
+
+def lag_charts(get, meta, bests, today):
+    """발표 지연 그래프 2개와 각 그래프 바로 아래 설명. get(sid) -> {월: 값}. 반환: HTML 문자열."""
+    td = datetime.date.fromisoformat(today)
+    # ── 그래프 1: 선행 시차 = 발표 대기 + 쓸 수 있는 시간 ──
+    rows = S.LAG_ROWS; W, LX, PW, RH, TOP = 820, 210, 470, 40, 44; MAXM = 3.5; px = PW / MAXM
+    H = TOP + RH * len(rows) + 30
+    o = [f"<svg viewBox='0 0 {W} {H}' class=lg role=img aria-label='지표별 선행 시차가 발표 대기와 쓸 수 있는 시간으로 나뉘는 그래프'>"]
+    for k in range(4):
+        x = LX + k * px
+        o.append(f"<line x1={x:.0f} x2={x:.0f} y1={TOP - 8} y2={H - 26} class=gr stroke-dasharray='3,3' /><text x={x:.0f} y={H - 10} text-anchor=middle class=m>{k}개월</text>")
+    o.append(f"<rect x={LX} y=10 width=14 height=14 class=wt /><text x={LX + 20} y=22 class=m>발표를 기다리는 시간</text>"
+             f"<rect x={LX + 170} y=10 width=14 height=14 class=ok /><text x={LX + 190} y=22 class=m>발표 후 쓸 수 있는 시간</text>")
+    rem = {}
+    for i, (sid, name, lead, src, lag_d, how, _pair) in enumerate(rows):
+        y = TOP + i * RH; lag_m = lag_d / 30.0; use = max(lead - lag_m, 0); rem[sid] = use
+        o.append(f"<text x={LX - 10} y={y + 15} text-anchor=end class=t>{e(name)}</text><text x={LX - 10} y={y + 31} text-anchor=end class=m>선행 {lead}개월 · 발표 약 {lag_d}일 뒤</text>")
+        w1 = lag_m * px; w2 = use * px
+        o.append(f"<rect x={LX} y={y + 6} width={max(w1, 1.5):.1f} height=26 class=wt />"
+                 f"<rect x={LX + w1:.1f} y={y + 6} width={w2:.1f} height=26 class=ok />")
+        if w1 >= 70: o.append(f"<text x={LX + w1 / 2:.0f} y={y + 24} text-anchor=middle class=bl>{lag_m:.1f}개월</text>")
+        o.append(f"<text x={LX + w1 + w2 + 8:.0f} y={y + 24} class=t style='font-weight:700'>남는 {use:.1f}개월</text>")
+    o.append("</svg>")
+    g1 = "".join(o)
+    slow = [(n, lead, lag_d, rem[sid]) for sid, n, lead, _s, lag_d, _h, _p in rows if lag_d >= 20]
+    fast = [(n, lead, lag_d, rem[sid]) for sid, n, lead, _s, lag_d, _h, _p in rows if lag_d < 20]
+    ex1 = (f"<p class=lgx><b>읽는 법</b> 막대 전체 길이가 '이 지표가 경기를 앞선다고 하는 개월 수'다. 주황은 값이 <b>발표될 때까지 기다리는 시간</b>이라 쓸 수 없고, 초록만 <b>실제로 대응할 수 있는 시간</b>이다. "
+           f"{' · '.join(f'{e(n)} {lag_d}일 지연 → 남는 {r:.1f}개월' for n, _l, lag_d, r in slow)}. "
+           f"반면 {', '.join(e(n) for n, *_ in fast)}는 매일 값이 나와 선행 시차가 거의 그대로 남는다. "
+           f"그래서 <b>선행지수는 '방향이 바뀌었는지 확인하는 용도'</b>, <b>일별 지표는 '발표 전에 미리 가늠하는 용도'</b>로 나눠 쓰는 것이 맞다. "
+           f"<span class=meta>선행 시차는 영상 주장(OECD·통계청은 통상 3개월), 발표 지연은 알려진 발표 관행에서 잡은 대략의 값이다.</span></p>")
+    # ── 그래프 2: 지금 DB 의 마지막 값이 얼마나 묵었나 ──
+    fr = []
+    for sid in S.FRESH_SIDS:
+        d = get(sid)
+        if not d: continue
+        lm = max(d)
+        dt = td if lm[:7] == today[:7] else _month_end(lm)
+        fr.append((sid, (meta[sid]["name"] if sid in meta else sid), lm, dt, (td - dt).days))
+    fr.sort(key=lambda r: -r[4])
+    start = td - datetime.timedelta(days=120); span = 120.0; PW2 = 470; RH2 = 32; TOP2 = 34
+    H2 = TOP2 + RH2 * len(fr) + 30
+    o = [f"<svg viewBox='0 0 {W} {H2}' class=lg role=img aria-label='지표별 마지막 값이 오늘보다 얼마나 이전 것인지 보여 주는 그래프'>"]
+    m = datetime.date(start.year, start.month, 1)
+    while m <= td:
+        if m >= start:
+            x = LX + (m - start).days / span * PW2
+            o.append(f"<line x1={x:.0f} x2={x:.0f} y1={TOP2 - 8} y2={H2 - 26} class=gr stroke-dasharray='3,3' /><text x={x:.0f} y={H2 - 10} text-anchor=middle class=m>{m.month}월 1일</text>")
+        m = datetime.date(m.year + (m.month == 12), m.month % 12 + 1, 1)
+    xt = LX + PW2
+    o.append(f"<line x1={xt} x2={xt} y1={TOP2 - 8} y2={H2 - 26} stroke='var(--fg)' /><text x={xt} y={H2 - 10} text-anchor=middle class=m style='font-weight:700'>오늘 {td.month}/{td.day}</text>"
+             f"<rect x={LX} y=8 width=14 height=14 class=blind /><text x={LX + 20} y=20 class=m>마지막 값 이후 아직 반영 안 된 기간</text>")
+    for i, (sid, name, lm, dt, days) in enumerate(fr):
+        y = TOP2 + i * RH2; xs = LX + max((dt - start).days, 0) / span * PW2
+        o.append(f"<text x={LX - 10} y={y + 19} text-anchor=end class=t>{e(name)}</text>"
+                 f"<rect x={xs:.1f} y={y + 7} width={max(xt - xs, 1.5):.1f} height=16 class=blind />"
+                 f"<circle cx={xs:.1f} cy={y + 15} r=5 class=ok />"
+                 f"<text x={xt + 8} y={y + 19} class=t>{'오늘까지' if days <= 3 else f'{days}일 전 값'}<tspan class=m> ({lm[:7]})</tspan></text>")
+    o.append("</svg>")
+    g2 = "".join(o)
+    old = [r for r in fr if r[4] > 20]; new = [r for r in fr if r[4] <= 20]
+    ex2 = (f"<p class=lgx><b>읽는 법</b> 초록 점이 DB에 있는 그 지표의 마지막 값이고, 점에서 오른쪽 '오늘' 선까지 회색 막대가 <b>아직 모르는 기간</b>이다. "
+           f"오늘({td.month}/{td.day}) 기준으로 {', '.join(f'{e(n)}{eun(n)} {d}일 전({lm[:7]}) 값' for _s, n, lm, _dt, d in old[:4])}{' 등' if len(old) > 4 else ''}까지만 알고 있다"
+           f"{'(다음 발표는 보통 이달 말~다음 달 초)' if old else ''}. "
+           f"{', '.join(e(n) for _s, n, *_ in new)} 모두 오늘 값까지 들어와 있다. "
+           f"<b>회색이 긴 지표로 확정하고 회색이 짧은 지표로 현재를 가늠한다</b>고 보면 된다. 선행지수가 지난 방향을 알려 주는 동안 일별 지표가 이미 방향을 바꿨다면 그것이 먼저 보내는 신호다. <span class=meta>한국 장단기 금리차는 이 페이지가 한국은행 월 자료(월평균)를 쓰기 때문에 한 달 늦게 보일 뿐, 일별 국고채 금리는 지표 페이지에서 매일 갱신된다.</span></p>")
+    # 표
+    trs = ""
+    for sid, name, lead, src, lag_d, how, pair in rows:
+        b = bests.get(pair) if pair else None
+        trs += (f"<tr><td>{e(name)}<td>{lead}개월 <span class=meta>({e(src)})</span><td>{lag_d}일 <span class=meta>({e(how)})</span>"
+                f"<td><b>{rem[sid]:.1f}개월</b><td>{'-' if b is None else f'{b:+d}개월'}</tr>")
+    tab = (f"<details><summary>숫자로 보기</summary><div style='overflow-x:auto'><table><tr><th>지표<th>선행 시차<th>발표 지연(추정)<th>남는 시간<th>데이터상 최적 시차</tr>{trs}</table></div>"
+           f"<p class=meta>데이터상 최적 시차는 아래 4️⃣ 표와 같은 계산이며, 비교 대상(뒤 지표)이 지표마다 달라 서로 직접 비교하기는 어렵다. '-'는 해당 쌍을 계산하지 않은 것이고, 마이너스는 뒤 지표가 먼저 움직였다는 뜻이다.</p></details>")
+    return (f"<h2 class=cat-h>⏱️ 신호가 늦게 나오면 선행은 얼마나 남나</h2>"
+            f"<p class=meta>선행지수가 3개월 앞선다 해도 발표가 늦으면 그만큼 줄어든다. 두 그래프로 한눈에 본다.</p>"
+            f"<h3 class=sub-h>① 선행 시차 중 실제로 쓸 수 있는 시간</h3><div style='overflow-x:auto'>{g1}</div>{ex1}"
+            f"<h3 class=sub-h>② 지금 지표별 마지막 값은 얼마나 묵었나</h3><div style='overflow-x:auto'>{g2}</div>{ex2}{tab}")
 
 
 def fmtv(v, unit=""):
@@ -364,6 +456,9 @@ def build(con=None):
                       f"<td>{best:+d}개월 <span class=meta>(r={'-' if vals.get(best) is None else format(vals[best], '.2f')})</span>"
                       f"<td>{'-' if vals.get(o['claim']) is None else format(vals[o['claim']], '.2f')}<td>{VCLS[v[0]]} {e(v[1])}</tr>")
         pairs_js.append({"id": p["id"], "options": popts})
+
+    bests = {(o["leader"], o["follower"]): o["best"] for p in S.PAIRS for o in p["options"]}
+    lagsec = lag_charts(lambda x: ser[x] if x in ser else F.load(con, x), meta, bests, today)
 
     # 데이터(JSON): 개월 단위 정렬
     used = {o[k] for p in S.PAIRS for o in p["options"] for k in ("leader", "follower")}
@@ -534,6 +629,7 @@ def build(con=None):
             f"<p class=meta>지금까지 모인 유튜브 영상(주로 김영익 교수)에서 나온 선행 관계를 모으고, 같은 쌍을 공개 시계열로 다시 그렸다 · 시계열 수집 {esc(fetched)} · <a href='kimyoungik.html'>🎓 김영익 교수 페이지</a> · <a href='indicators.html'>📊 지표</a> · <a href='index.html'>🏠 홈</a></p>"
             f"<section class=card><h3>한 줄 요약</h3><p>{esc(S.SUMMARY)}</p></section>"
             f"{dirsec}"
+            f"{lagsec}"
             f"<h2 class=cat-h>1️⃣ 선행이란 무엇인가</h2><div class=grid3>{concept}</div>"
             f"<div class=card><h3>왜 어떤 지표는 먼저 움직일까</h3><ul>{why}</ul>{lead_lag_svg()}<p class=meta style='margin-top:8px'>{esc(S.CIRCULAR)}</p></div>{official}"
             f"<h2 class=cat-h>2️⃣ 선행의 사슬 — 누가 누구에게 영향을 주나</h2>"
