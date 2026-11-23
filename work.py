@@ -101,7 +101,7 @@ def gen_phase(con, st):
     if key: write_task("phase", ["phase"], I.phase_prompt(today), "\n".join(key))
 
 def gen_check(con, st):
-    due = [c for c in A.due_checks(con, 300) if str(c["id"]) not in tried(st, "check")]
+    due = [c for c in A.due_checks(con, A.CHECK_PER_RUN * 3) if str(c["id"]) not in tried(st, "check")]
     if not due: return
     items = A.build_items(con, due)
     for ch in chunks(items, A.CHUNK): write_task("check", [i for i, _ in ch], A.PROMPT, "\n".join(t for _, t in ch))

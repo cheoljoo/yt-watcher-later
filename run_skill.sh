@@ -29,11 +29,11 @@ for i in $(seq 1 "$ROUNDS"); do
   echo "--- 라운드 $i: $TOOL 세션 시작 $(date '+%T')"
   if [ "$TOOL" = claude ]; then
     claude -p "/yt-daily" --model "$MODEL" --no-session-persistence \
-           --allowedTools "Bash(uv run work.py:*)" "Read" --permission-mode acceptEdits 2>&1 | tail -n 5
+           --allowedTools "Bash(uv run work.py:*)" "Read" "WebSearch" "WebFetch" --permission-mode acceptEdits 2>&1 | tail -n 5
   else
     mkdir -p logs; AL="logs/agy-session-$(date +%F-%H%M%S).jsonl"
     agy -p "/yt-daily" ${AGY_MODEL:+--model "$AGY_MODEL"} --mode accept-edits --output-format stream-json \
-        --settings '{"permissions":{"allow":["command(uv run work.py)","command(ls)","command(cat)","command(head)","command(tail)","command(find)","command(grep)","command(wc)"]}}' > "$AL" 2>&1
+        --settings '{"permissions":{"allow":["command(uv run work.py)","command(ls)","command(cat)","command(head)","command(tail)","command(find)","command(grep)","command(wc)","search_web","read_url_content"]}}' > "$AL" 2>&1
     tail -n 1 "$AL" | cut -c1-600                      # 결과 요약(토큰 사용량·거부된 동작 포함). 전체 기록은 $AL
   fi
   uv run work.py status && continue        # more -> 다음 라운드
