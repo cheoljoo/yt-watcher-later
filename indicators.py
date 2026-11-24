@@ -95,7 +95,7 @@ def map_sources(con, cfg):
 def merge_duplicates(con):
     """같은 출처·심볼을 가리키는 지표는 하나로 합친다(가장 짧은 이름이 대표). 나머지는 별칭(alias_of)으로 비활성화하고 영상 출처를 대표에 옮긴다."""
     n = 0
-    for g in con.execute("SELECT source, symbol FROM indicators WHERE source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx') AND symbol!='' AND alias_of IS NULL GROUP BY source, symbol HAVING count(*)>1").fetchall():
+    for g in con.execute("SELECT source, symbol FROM indicators WHERE source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx','sec') AND symbol!='' AND alias_of IS NULL GROUP BY source, symbol HAVING count(*)>1").fetchall():
         rows = sorted(con.execute("SELECT id,name FROM indicators WHERE source=? AND symbol=? AND alias_of IS NULL", (g["source"], g["symbol"])).fetchall(), key=lambda r: (len(r["name"]), r["id"]))
         main, rest = rows[0]["id"], rows[1:]
         for r in rest:
@@ -147,7 +147,7 @@ def gather_values(con, force=False, ids=None):
     ids: 이 지표들만 받는다(새로 추가한 지표를 그날 바로 채울 때 — 이미 받은 다른 지표의 값·해설은 건드리지 않는다)."""
     today = D.today()
     if not force and not ids and con.execute("SELECT 1 FROM indicator_values WHERE date=? LIMIT 1", (today,)).fetchone(): return None
-    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx') AND symbol!=''").fetchall()
+    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx','sec') AND symbol!=''").fetchall()
     if ids: inds = [x for x in inds if x["id"] in set(ids)]
     skipped = con.execute("SELECT count(*) FROM indicators WHERE active=1 AND (source IS NULL OR source='none' OR symbol='')").fetchone()[0]
     with ThreadPoolExecutor(5) as ex: series = list(ex.map(lambda i: marketdata.fetch(i["source"], i["symbol"]), inds))

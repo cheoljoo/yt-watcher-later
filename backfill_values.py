@@ -12,7 +12,7 @@ YEARS = 3
 
 def run(ids=None, years=YEARS):
     con = D.connect()
-    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx') AND symbol!=''").fetchall()
+    inds = con.execute("SELECT * FROM indicators WHERE active=1 AND source IN ('yahoo','fred','kofia','multpl','ecos','rone','krx','sec') AND symbol!=''").fetchall()
     if ids: inds = [i for i in inds if i["id"] in set(ids)]
     back = int(years * 365.25) + 40                                    # 방향 계산용 여유
     cutoff = (datetime.date.today() - datetime.timedelta(days=int(years * 365.25))).isoformat()

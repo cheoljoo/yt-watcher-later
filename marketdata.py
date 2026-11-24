@@ -51,7 +51,8 @@ def secret(name):
 
 def ecos(symbol, back=None):
     """한국은행 ECOS(인증키 필요: ~/.config/yt-watcher-later/env 의 ECOS_API_KEY). symbol = "통계표/주기/항목1[/항목2..][|옵션...]"
-    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, ma3 = 3기간 이동평균, scale=배율, 예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001"""
+    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, ma3 = 3기간 이동평균, scale=배율, minus=항목코드(같은 통계표·주기의 다른 항목을 날짜별로 뺌: 금리 스프레드),
+    예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001 , 817Y002/D/010300000|minus=010200000 (회사채 AA- 3년 − 국고채 3년)"""
     key = secret("ECOS_API_KEY")
     if not key: return None
     try:
@@ -59,18 +60,84 @@ def ecos(symbol, back=None):
         today = datetime.date.today(); back_d = today - datetime.timedelta(days=max(back or 0, 1100 if cyc in ("M", "Q", "A") else 200))
         fmt = {"M": lambda d: d.strftime("%Y%m"), "D": lambda d: d.strftime("%Y%m%d"), "A": lambda d: d.strftime("%Y"),
                "Q": lambda d: f"{d.year}Q{(d.month - 1) // 3 + 1}"}[cyc]
-        t = _get(f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/10000/{stat}/{cyc}/{fmt(back_d)}/{fmt(today)}/" + "/".join(items))
-        rows = []
-        for r in json.loads(t)["StatisticSearch"]["row"]:
-            p, v = r["TIME"], r["DATA_VALUE"]
-            if v in (None, ""): continue
-            d = (f"{p[:4]}-{p[4:6]}-01" if cyc == "M" else f"{p[:4]}-{int(p[5]) * 3 - 2:02d}-01" if cyc == "Q" else f"{p[:4]}-{p[4:6]}-{p[6:8]}" if cyc == "D" else f"{p[:4]}-01-01")
-            rows.append((d, float(v)))
-        rows.sort()
+        def fetch_rows(its):
+            t = _get(f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/10000/{stat}/{cyc}/{fmt(back_d)}/{fmt(today)}/" + "/".join(its))
+            rows = []
+            for r in json.loads(t)["StatisticSearch"]["row"]:
+                p, v = r["TIME"], r["DATA_VALUE"]
+                if v in (None, ""): continue
+                d = (f"{p[:4]}-{p[4:6]}-01" if cyc == "M" else f"{p[:4]}-{int(p[5]) * 3 - 2:02d}-01" if cyc == "Q" else f"{p[:4]}-{p[4:6]}-{p[6:8]}" if cyc == "D" else f"{p[:4]}-01-01")
+                rows.append((d, float(v)))
+            rows.sort()
+            return rows
+        rows = fetch_rows(items)
+        for o in opts:
+            if o.startswith("minus="):
+                other = dict(fetch_rows([o[6:]])); rows = [(d, v - other[d]) for d, v in rows if d in other]
         for o in opts:
             if o == "diff": rows = [(rows[i][0], rows[i][1] - rows[i - 1][1]) for i in range(1, len(rows))]
             elif o.startswith("scale="): rows = [(d, v * float(o[6:])) for d, v in rows]
             elif o == "ma3": rows = [(rows[i][0], sum(v for _, v in rows[i - 2:i + 1]) / 3) for i in range(2, len(rows))]
+        return rows or None
+    except Exception: return None
+
+# ── 빅테크 재무(SEC EDGAR XBRL, 키 불필요) ────────────────────────────────
+SEC_CIK = {"MSFT": "0000789019", "GOOGL": "0001652044", "AMZN": "0001018724", "META": "0001326801"}      # 분기 말이 3·6·9·12월이라 달력 분기로 합산할 수 있는 4사
+SEC_TAGS = {"OCF": ["NetCashProvidedByUsedInOperatingActivities"],
+            "CAPEX": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+            "DEBT": ["LongTermDebtNoncurrent", "LongTermDebt"]}
+_SEC_CACHE = {}
+
+def _sec_facts(cik):
+    if cik not in _SEC_CACHE:
+        _SEC_CACHE[cik] = json.loads(_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json", ua={"User-Agent": "yt-watcher-later personal research"}))["facts"]["us-gaap"]
+    return _SEC_CACHE[cik]
+
+def _quarters(units):
+    """공시(10-Q·10-K)의 기간 값 -> {분기말: 그 분기만의 값}. 현금흐름은 누적(3·6·9·12개월)으로 공시되므로 직전 누적을 뺀다."""
+    best = {}
+    for u in units:
+        if u.get("form") not in ("10-Q", "10-K") or "start" not in u: continue
+        k = (u["start"], u["end"])
+        if k not in best or u["filed"] > best[k]["filed"]: best[k] = u            # 정정 공시는 나중 것을 쓴다
+    out = {}
+    for (st, en), u in sorted(best.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        days = (datetime.date.fromisoformat(en) - datetime.date.fromisoformat(st)).days
+        if days < 120: out.setdefault(en, u["val"]); continue                       # 3개월 값
+        prev = [(e2, v["val"]) for (s2, e2), v in best.items() if s2 == st and e2 < en]
+        if prev:
+            pe, pv = max(prev)
+            if 70 <= (datetime.date.fromisoformat(en) - datetime.date.fromisoformat(pe)).days <= 110: out.setdefault(en, u["val"] - pv)
+    return out
+
+def _instants(units):
+    best = {}
+    for u in units:
+        if u.get("form") in ("10-Q", "10-K") and "start" not in u:
+            if u["end"] not in best or u["filed"] > best[u["end"]]["filed"]: best[u["end"]] = u
+    return {e: u["val"] for e, u in best.items()}
+
+def sec(symbol, back=None):
+    """symbol = "BIGTECH:OCF|CAPEX|FCF|DEBT" — 마이크로소프트·알파벳·아마존·메타 4사 합산(분기, 십억 달러). FCF = 영업현금흐름 − 설비투자. DEBT = 분기 말 장기부채 잔액."""
+    try:
+        grp, kind = symbol.split(":")
+        per = {}
+        for tk, cik in SEC_CIK.items():
+            facts = _sec_facts(cik)
+            def merged(k):
+                out = {}
+                for tag in SEC_TAGS[k]:                                      # 태그가 회사·연도마다 달라 다음 태그로 메운다
+                    if tag in facts:
+                        u = facts[tag]["units"]["USD"]
+                        for e, v in (_instants(u) if k == "DEBT" else _quarters(u)).items(): out.setdefault(e, v)
+                return out
+            if kind == "FCF":
+                o, c = merged("OCF"), merged("CAPEX")
+                per[tk] = {e: o[e] - c[e] for e in o if e in c}
+            else: per[tk] = merged(kind)
+        dates = set.intersection(*[set(v) for v in per.values()])
+        cut = (datetime.date.today() - datetime.timedelta(days=max(back or 0, 1500))).isoformat()
+        rows = sorted((d, sum(per[t][d] for t in per) / 1e9) for d in dates if d >= cut)
         return rows or None
     except Exception: return None
 
@@ -215,7 +282,7 @@ def krx_history(symbol, months):
         return sorted(out) or None
     except Exception: return None
 
-SOURCES = ("yahoo", "fred", "kofia", "multpl", "ecos", "rone", "krx")           # 자동으로 값을 받을 수 있는 출처
+SOURCES = ("yahoo", "fred", "kofia", "multpl", "ecos", "rone", "krx", "sec")           # 자동으로 값을 받을 수 있는 출처
 
 def fetch(source, symbol, back=None):
     """back: 며칠 전까지의 이력을 받을지(1회성 이력 채우기). 없으면 평소처럼 최근 값만."""
@@ -224,6 +291,7 @@ def fetch(source, symbol, back=None):
     if source == "kofia": return kofia(symbol, back)
     if source == "ecos": return ecos(symbol, back)
     if source == "rone": return rone(symbol, back)
+    if source == "sec": return sec(symbol, back)
     if source == "multpl": return (multpl_history(symbol) if back else None) or multpl(symbol)
     if source == "krx": return (krx_history(symbol, back // 30) if back else None) or krx(symbol)
     return None
