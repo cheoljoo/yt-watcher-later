@@ -85,7 +85,8 @@ def ecos(symbol, back=None):
 SEC_CIK = {"MSFT": "0000789019", "GOOGL": "0001652044", "AMZN": "0001018724", "META": "0001326801"}      # 분기 말이 3·6·9·12월이라 달력 분기로 합산할 수 있는 4사
 SEC_TAGS = {"OCF": ["NetCashProvidedByUsedInOperatingActivities"],
             "CAPEX": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
-            "DEBT": ["LongTermDebtNoncurrent", "LongTermDebt"]}
+            "DEBT": ["LongTermDebtNoncurrent", "LongTermDebt"],
+            "DEBTCUR": ["LongTermDebtCurrent", "DebtCurrent"]}                       # 1년 안에 갚아야 하는 부채(차환 부담)
 _SEC_CACHE = {}
 
 def _sec_facts(cik):
@@ -121,6 +122,8 @@ def sec(symbol, back=None):
     """symbol = "BIGTECH:OCF|CAPEX|FCF|DEBT" — 마이크로소프트·알파벳·아마존·메타 4사 합산(분기, 십억 달러). FCF = 영업현금흐름 − 설비투자. DEBT = 분기 말 장기부채 잔액."""
     try:
         grp, kind = symbol.split(":")
+        yoy = kind.endswith("_YOY")
+        if yoy: kind = kind[:-4]
         per = {}
         for tk, cik in SEC_CIK.items():
             facts = _sec_facts(cik)
@@ -129,15 +132,25 @@ def sec(symbol, back=None):
                 for tag in SEC_TAGS[k]:                                      # 태그가 회사·연도마다 달라 다음 태그로 메운다
                     if tag in facts:
                         u = facts[tag]["units"]["USD"]
-                        for e, v in (_instants(u) if k == "DEBT" else _quarters(u)).items(): out.setdefault(e, v)
+                        for e, v in (_instants(u) if k in ("DEBT", "DEBTCUR") else _quarters(u)).items(): out.setdefault(e, v)
                 return out
+            instant = kind in ("DEBT", "DEBTCUR")
             if kind == "FCF":
                 o, c = merged("OCF"), merged("CAPEX")
                 per[tk] = {e: o[e] - c[e] for e in o if e in c}
+            elif kind == "DEBTCUR":                                   # 1년 내 만기 부채가 없으면 항목 자체가 공시되지 않으므로 장기부채가 있는 분기는 없는 칸을 0 으로 본다
+                cur = merged("DEBTCUR")
+                per[tk] = {e: cur.get(e, 0.0) for e in merged("DEBT")}
             else: per[tk] = merged(kind)
         dates = set.intersection(*[set(v) for v in per.values()])
         cut = (datetime.date.today() - datetime.timedelta(days=max(back or 0, 1500))).isoformat()
         rows = sorted((d, sum(per[t][d] for t in per) / 1e9) for d in dates if d >= cut)
+        if yoy:                                                                   # 같은 분기의 4분기 전 대비 증가율(%)
+            by = {d: v for d, v in rows}; out = []
+            for d, v in rows:
+                p = f"{int(d[:4]) - 1}{d[4:]}"
+                if by.get(p): out.append((d, (v / by[p] - 1) * 100))
+            rows = out
         return rows or None
     except Exception: return None
 
