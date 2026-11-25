@@ -183,7 +183,7 @@ def seed_pending_block(con):
 
 def build_indicators(con):
     last = con.execute("SELECT max(date) FROM indicator_values").fetchone()[0]
-    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a></p>" + IND_LEGEND + macro_block(con)
+    body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a> · <a href='linkage.html'>🔗 지표 연결(이어진 지표를 묶어 분석)</a></p>" + IND_LEGEND + macro_block(con)
     if not last:
         body += "<p class=meta>아직 수집된 지표 값이 없습니다(일일 실행에서 수집).</p>"
         (OUT / "indicators.html").write_text(page("지표", body, "📊"), encoding="utf-8"); return

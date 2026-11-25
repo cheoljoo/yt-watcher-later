@@ -144,6 +144,7 @@ FLOW_CSS = """<style>
 .flow .ar{align-self:center;color:var(--mu);font-size:18px}
 .smap{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin:8px 0}
 .smap a.n{display:block;border:1px solid var(--bd);border-radius:10px;padding:8px 10px;text-decoration:none;font-size:13px}
+.sg{margin:12px 0}.sh{font-weight:700;font-size:14.5px;border-bottom:1px solid var(--bd);padding-bottom:3px}.smap a.n.sub{margin-left:16px;border-style:dashed}
 .smap a.n b{display:block;color:var(--ac)}.smap a.n small{color:var(--mu)}
 </style>"""
 
@@ -155,25 +156,30 @@ def how_block():
           ("5️⃣ 리포트","DB만 읽어 HTML/JSON 생성<br><small>(report.py, report_extra.py, stats.py, highlight.py)</small>"),
           ("6️⃣ 공개","reports/ → nginx<br><small>psncs.iptime.org/yt_watch_later/</small>")]
     flow = '<span class=ar>›</span>'.join(f"<div class=st><b>{a}</b>{b}</div>" for a, b in st)
-    pages = [("index.html","🏠 index (지금 이 화면)","실행(날짜_시분-LLM)별 리포트 목록"),
-             ("#runs","🗓️ 실행별 리포트","카테고리 → 주제 → 영상 카드 (아래 처리 목록에서 선택)"),
-             ("checks_pending.html","⏳ 앞으로 확인할 것","확인 예정 항목(예상이 맞을 때/틀릴 때 포함)"),
-             ("checks_done.html","✅ 확인한 것","판정 결과"),
-             ("indicators.html","📊 지표","설명·시세·의미·매크로 (AI 표기)"),
-             ("indicator_trends.html","📉 지표 추이","날짜별 그래프·중요한 날·상황 설명"),
-             ("stats.html","📈 시청 성향","많이 보는 채널·인물"),
-             ("stats_channels.html","📺 모든 채널","stats 에서 연결"),
-             ("opinions.html","💬 나와 AI 의견","내가 남긴 의견과 AI 의견"),
-             ("actions.html","🎯 액션 (직접 해볼 것)","직접 해봐야 할 영상과 해본 의견"),
-             ("highlights.html","⭐ 인상 깊은 영상","왼쪽 목록·오른쪽 상세"),
-             ("browse.html","🗂️ 날짜·주제별 보기","업로드일 최신순, 주제·기간·페이지 크기 선택"),
-             ("seodaeri.html","📺 서대리TV 투자 방식","규칙·매매 이력 차트·따라 하는 법·지금 상태(매일 갱신)"),
-             ("kimyoungik.html","🎓 김영익 교수 투자 방식","교재+영상: 국면별 비중·점검 지표·지금 상태(매일 갱신)"),
-             ("seojunsik.html","🏛️ 서준식 교수 투자 방식","채권형 주식 계산기·자산배분 원칙·금리 기준·지금 상태"),
-             ("rich.html","💰 부자들","부자들이 쓰는 투자 방법 매일 3개(요약+원문 링크)"),
-             ("leading.html","🧭 선행지수 정리","선행지표의 방향·투자 의견·선행 관계 그래프(시차 슬라이더)"),
-             ("watchlater.json","🧾 전체 데이터","JSON")]
-    smap = "".join(f"<a class=n href='{u}'><b>{t}</b><small>{d}</small></a>" for u, t, d in pages)
+    import linkage_data as LD
+    cases = [(f"linkage_{c['id']}.html", f"└ {c['title']}", c["question"], True) for c in LD.CASES]
+    tree = [("📊 지표", [("indicators.html", "📊 지표 대시보드", "설명·시세·의미·매크로 (AI 표기)"),
+                         ("indicator_trends.html", "📉 지표 추이", "날짜별 그래프·중요한 날(주별 큰 일)·상황 설명"),
+                         ("linkage.html", "🔗 지표 연결", "이어진 지표를 묶어 분석하는 사례 모음(계속 추가)")] + cases +
+                        [("leading.html", "🧭 선행지수 정리", "선행지표의 방향·투자 의견·선행 관계 그래프(시차 슬라이더)")]),
+            ("🎬 투자 방식", [("seodaeri.html", "📺 서대리TV", "규칙·매매 이력 차트·따라 하는 법·지금 상태(매일 갱신)"),
+                            ("kimyoungik.html", "🎓 김영익 교수", "교재+영상: 국면별 비중·점검 지표·지금 상태(매일 갱신)"),
+                            ("seojunsik.html", "🏛️ 서준식 교수", "채권형 주식 계산기·자산배분 원칙·금리 기준·지금 상태")]),
+            ("💰 부자들", [("rich.html", "💰 부자들", "부자들이 쓰는 투자 방법 매일 3개(요약+원문 링크)")]),
+            ("✅ 나의 확인 사항", [("checks_pending.html", "⏳ 앞으로 확인할 것", "확인 예정 항목(예상이 맞을 때/틀릴 때 포함)"),
+                               ("checks_done.html", "✅ 확인한 것", "판정 결과(주제·신호·기간 선택)"),
+                               ("opinions.html", "💬 나와 AI 의견", "내가 남긴 의견과 AI 의견"),
+                               ("actions.html", "🎯 액션", "직접 해봐야 할 영상과 해본 의견"),
+                               ("highlights.html", "⭐ 인상 깊은 영상", "왼쪽 목록·오른쪽 상세")]),
+            ("📈 나의 성향", [("stats.html", "📈 시청 성향", "많이 보는 채널·인물(주제별 TOP30)"),
+                            ("stats_channels.html", "📺 모든 채널", "시청한 모든 채널")]),
+            ("🗂️ 리포트", [("#runs", "🗓️ 실행별 리포트", "카테고리 → 주제 → 영상 카드 (아래 처리 목록에서 선택)"),
+                         ("browse.html", "🗂️ 날짜·주제별 보기", "업로드일 최신순, 주제·기간·페이지 크기 선택"),
+                         ("watchlater.json", "🧾 전체 데이터", "JSON")])]
+    def tile(x):
+        u, t, d = x[:3]; sub = len(x) > 3
+        return f"<a class='n{' sub' if sub else ''}' href='{u}'><b>{t}</b><small>{d}</small></a>"
+    smap = "".join(f"<div class=sg><div class=sh>{g}</div><div class=smap>{''.join(tile(x) for x in items)}</div></div>" for g, items in tree)
     return (FLOW_CSS + "<details open class=card><summary><b>🔧 이 페이지는 어떻게 만들어지나</b></summary>"
             "<p class=meta>매일 01:00 cron → run_skill.sh --agy (flock 으로 중복 실행 방지). 수집·DB·리포트는 코드가 하고, LLM 은 JSON 만 만든다. 모든 페이지는 실행 끝에 코드가 다시 만든다.</p>"
             f"<div class=flow>{flow}</div>"
@@ -192,13 +198,15 @@ def build_all(con):
     last = D.today()          # 오늘 새벽 실행에서 처리된 것만 홈에 보여준다(지난 날의 것은 확인한 것·나와 AI 의견 페이지에서 찾아 본다)
     yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall()
     late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='rich.html'>💰 부자들</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='linkage.html'>🔗 지표 연결</a> · <a href='rich.html'>💰 부자들</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += how_block()
     body += backlog_block(con)
     import opinions as OPN
     opn = OPN.day_block(con, last, {c["video_id"] for c in yday})
     if yday: body += f"<section class=card><h3>✅ 어제 확인한 항목 ({len(yday)})</h3><p class=meta>확인일이 어제까지인 항목을 {e(last[:10])} 새벽 실행에서 AI가 판정한 결과입니다. 오늘 날짜 항목은 내일 새벽에 확인합니다.</p>" + checks_table(yday, True) + opn + "</section>"
     elif opn: body += f"<section class=card><h3>💬 오늘 달린 AI 의견</h3>{opn}</section>"
+    import rich as RICHP
+    body += RICHP.home_block(con)
     if late: body += f"<section class='card due'><h3>🟠 확인일이 지났지만 아직 확인 못 한 항목 ({len(late)})</h3><p class=meta>사용량 한도 등으로 못 한 것은 다음 실행에서 이어서 확인합니다.</p>" + checks_table(late, True) + "</section>"
     body += f"<table id=runs><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
@@ -212,6 +220,7 @@ def build_all(con):
     import seojunsik; seojunsik.build(con)
     import leading; leading.build(con)
     import opinions; opinions.build(con)
+    import linkage; linkage.build(con)
     import rich; rich.build(con)
     import actions; actions.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)

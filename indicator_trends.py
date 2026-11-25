@@ -229,7 +229,7 @@ def build(con):
     EB = EventBook(con)
     days = sorted({d for s in ser for d, _ in s["pts"]})
     body = (f"<h1>📉 지표 추이</h1><p class=meta>날짜별로 DB에 쌓인 지표 값({days[0] if days else '-'} ~ {days[-1] if days else '-'}, {len(days)}일치, 그래프는 최근 {YEARS}년) · 지표 {len(ser)}개 · "
-            "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='index.html'>🏠 홈</a></p>")
+            "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='linkage.html'>🔗 지표 연결</a> · <a href='index.html'>🏠 홈</a></p>")
     mac = con.execute("SELECT date, phase_index, phase FROM macro_daily ORDER BY date").fetchall()
     flips = [m for a, m in zip(mac, mac[1:]) if a["phase_index"] != m["phase_index"]]
     purple = ""
