@@ -10,11 +10,16 @@ MAX_LEN = 5000
 def get(con, vid):
     return con.execute("SELECT * FROM opinions WHERE video_id=?", (vid,)).fetchone()
 
+def exists(con, vid):
+    """의견을 달 수 있는 대상: 영상 id, 또는 부자들 항목('rich:번호')."""
+    if vid.startswith("rich:"): return bool(vid[5:].isdigit() and con.execute("SELECT 1 FROM rich_ideas WHERE id=?", (int(vid[5:]),)).fetchone())
+    return bool(con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone())
+
 def save_mine(con, vid, text):
     """저장 버튼. 반환 (ok, 메시지). AI 의견이 이미 있으면 거부, 빈 글이면 삭제(AI 의견 없을 때만)."""
     text = (text or "").strip()
     if len(text) > MAX_LEN: return False, f"{MAX_LEN}자까지 저장할 수 있습니다"
-    if not con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone(): return False, "알 수 없는 영상입니다"
+    if not exists(con, vid): return False, "알 수 없는 항목입니다"
     cur = get(con, vid)
     if cur and cur["ai_reply"]: return False, "AI 의견이 이미 달려 더 이상 수정할 수 없습니다"
     if not text:
@@ -56,9 +61,14 @@ def stars_json(con):
     return {r["video_id"]: bool(r["on_flag"]) for r in con.execute("SELECT * FROM stars")}
 
 def pending(con):
-    """내 의견은 있고 AI 의견이 없는 영상."""
-    return con.execute("""SELECT o.video_id, o.my_opinion, v.title, v.one_liner, v.summary, v.lessons, v.channel FROM opinions o JOIN videos v ON v.id=o.video_id
-                          WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (o.ai_reply IS NULL OR o.ai_reply='') ORDER BY o.my_at""").fetchall()
+    """내 의견은 있고 AI 의견이 없는 영상과 부자들 항목."""
+    rows = [dict(r) for r in con.execute("""SELECT o.video_id, o.my_opinion, v.title, v.one_liner, v.summary, v.lessons, v.channel FROM opinions o JOIN videos v ON v.id=o.video_id
+                          WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (o.ai_reply IS NULL OR o.ai_reply='') ORDER BY o.my_at""")]
+    for r in con.execute("""SELECT o.video_id, o.my_opinion, r.title, r.topic, r.summary, r.source, r.who FROM opinions o JOIN rich_ideas r ON 'rich:'||r.id=o.video_id
+                          WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (o.ai_reply IS NULL OR o.ai_reply='') ORDER BY o.my_at"""):
+        rows.append({"video_id": r["video_id"], "my_opinion": r["my_opinion"], "title": r["title"], "one_liner": f"부자들 투자 방법({r['topic']}, {r['who'] or ''})",
+                     "summary": json.dumps([r["summary"]], ensure_ascii=False), "lessons": None, "channel": r["source"]})
+    return rows
 
 def apply_ai(con, items):
     n = 0
@@ -77,7 +87,7 @@ def task_line(r):
     except Exception: pass
     return f"id={r['video_id']} | 영상: {r['title']} ({r['channel'] or ''}) | 한줄: {r['one_liner'] or ''} | 요약: {pts} | 나의 의견: {r['my_opinion']}"
 
-PROMPT = ("각 항목은 시청자가 영상을 보고 남긴 '나의 의견'입니다. 영상 요약을 참고해 그 의견에 답하세요. "
+PROMPT = ("각 항목은 시청자가 영상(또는 '부자들 투자 방법' 글 요약)을 보고 남긴 '나의 의견'입니다. 요약을 참고해 그 의견에 답하세요. "
           "동의할 부분과 보완·반박할 부분을 구분하고, 놓친 관점이나 확인해볼 점을 한두 가지 덧붙이세요. 4~8문장, 한국어. "
           "영상 요약에 없는 사실은 지어내지 말고, 확실하지 않으면 그렇다고 밝히세요. id는 입력 그대로.")
 SCHEMA = {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {
@@ -120,7 +130,7 @@ fetch(API+'actions').then(function(r){return r.json()}).then(function(all){docum
 
 OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}.star-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer;margin-left:6px}.star-btn.on{background:#f5b301;border-color:#f5b301;color:#222;font-weight:600}</style>"
 
-def box(con, vid):
+def box(con, vid, extras=True):
     """영상 카드 맨 아래: 나의 의견(AI 의견 전까지는 항상 편집 가능) + 있으면 AI 의견."""
     o = get(con, vid)
     my = (o["my_opinion"] if o else "") or ""
@@ -131,6 +141,7 @@ def box(con, vid):
         h += f"<textarea placeholder='이 영상에 대한 내 생각을 적고 저장을 누르세요 (AI 의견은 다음 새벽에 달립니다)'>{e(my)}</textarea><button type=button class=op-save>저장</button> <span class='op-msg meta'></span>"
         if my: h += "<div class=meta>AI 의견 대기 중 — 다음 새벽 실행에서 달립니다. 그 전까지는 수정할 수 있습니다.</div>"
     h += "</div>"
+    if not extras: return h
     a = con.execute("SELECT on_flag FROM actions WHERE video_id=?", (vid,)).fetchone()
     on = bool(a and a["on_flag"])
     st = con.execute("SELECT on_flag FROM stars WHERE video_id=?", (vid,)).fetchone()
@@ -179,6 +190,9 @@ def _head(text, n=110):
     t = " ".join((text or "").split())
     return t[:n] + ("…" if len(t) > n else "")
 
+OP_ROWS = ("""SELECT * FROM (SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id
+              UNION ALL SELECT o.*, r.title, r.source AS channel, '부자들' AS category, r.topic AS subtag, 'rich' AS page FROM opinions o JOIN rich_ideas r ON 'rich:'||r.id=o.video_id) """)
+
 def _item(r, filt=True, tag=""):
     """의견 한 항목(접힌 details). filt=True 이면 목록 페이지용 필터 속성과 hidden 을 붙인다."""
     has = bool(r["ai_reply"])
@@ -186,7 +200,7 @@ def _item(r, filt=True, tag=""):
     return (f"<details class=oi{attrs}>"
             f"<summary><b class=t><span class=no></span>{e(r['title'])}</b><span class='bd{' ok' if has else ''}'>{'🤖 AI 의견 있음' if has else '⏳ AI 의견 대기'}</span> {tag}<span class=meta>{e((r['my_at'] or '')[:10])}</span>"
             f"<div class=cl>💬 {e(_head(r['my_opinion']))}</div>" + (f"<div class='cl ai'>🤖 {e(_head(r['ai_reply']))}</div>" if has else "") + "</summary>"
-            f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{e(r['page'])}.html#v-{e(r['video_id'])}'>영상 카드로 가기 ›</a></div>"
+            f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{('rich.html#r-' + e(r['video_id'][5:])) if r['video_id'].startswith('rich:') else (e(r['page']) + '.html#v-' + e(r['video_id']))}'>{'부자들 항목으로' if r['video_id'].startswith('rich:') else '영상 카드로'} 가기 ›</a></div>"
             f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>"
             + (f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
                if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + "</details>")
@@ -195,8 +209,7 @@ def _item(r, filt=True, tag=""):
 def day_block(con, day, vids=()):
     """홈 '어제 확인한 항목' 아래: 그날 AI 의견이 달린 것 + 그날 확인한 항목의 영상에 남긴 의견. 없으면 빈 문자열."""
     vids = [v for v in vids if v]
-    q = ("SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id "
-         "WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (substr(o.ai_at,1,10)=?" + (f" OR o.video_id IN ({','.join('?' * len(vids))})" if vids else "") + ") ORDER BY o.ai_at DESC, o.my_at DESC")
+    q = (OP_ROWS + "WHERE my_opinion IS NOT NULL AND my_opinion<>'' AND (substr(ai_at,1,10)=?" + (f" OR video_id IN ({','.join('?' * len(vids))})" if vids else "") + ") ORDER BY ai_at DESC, my_at DESC")
     rows = con.execute(q, (day, *vids)).fetchall()
     if not rows: return ""
     items = "".join(_item(r, False, "<span class=meta>[오늘 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[확인한 항목의 영상]</span> ") for r in rows)
@@ -207,8 +220,7 @@ def day_block(con, day, vids=()):
 def build(con):
     """'나와 AI 의견' 페이지. 날짜·주제별 보기와 같은 선택(주제·기간·한 페이지 수) + AI 의견 있음/없음. 항목은 접힌 상태(summary=처음 부분)."""
     import report as R
-    rows = con.execute("""SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id
-                          WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' ORDER BY o.my_at DESC""").fetchall()
+    rows = con.execute(OP_ROWS + "WHERE my_opinion IS NOT NULL AND my_opinion<>'' ORDER BY my_at DESC").fetchall()
     n_ai = sum(1 for r in rows if r["ai_reply"])
     cats, subs = {}, {}
     for r in rows:

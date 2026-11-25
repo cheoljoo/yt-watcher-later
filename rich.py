@@ -57,6 +57,7 @@ def apply(con, data):
 
 def build(con):
     import report as R
+    import opinions as OPN
     rows = con.execute("SELECT * FROM rich_ideas ORDER BY date DESC, id").fetchall()
     cnt = {}
     for r in rows: cnt[r["topic"]] = cnt.get(r["topic"], 0) + 1
@@ -65,9 +66,9 @@ def build(con):
     rec = opt("all", "모두") + "".join(opt(d, t) for d, t in ((0, "오늘"), (7, "최근 1주일"), (30, "최근 1개월"), (90, "최근 3개월"), (365, "최근 1년")))
     items = ""
     for r in rows:
-        items += (f"<section class='card ri' hidden data-t='{e(r['topic'])}' data-d='{e(r['date'])}'><h3><span class=no></span>{e(r['title'])}</h3>"
+        items += (f"<section class='card ri' id='r-{r['id']}' hidden data-t='{e(r['topic'])}' data-d='{e(r['date'])}'><h3><span class=no></span>{e(r['title'])}</h3>"
                   f"<div class=meta>🏷️ {e(r['topic'])} · 📰 기사 {e(r['pub_date'] or '날짜 미확인')} · 📅 수집 {e(r['date'])} · 👤 {e(r['who'] or '')} · 🏢 {e(r['source'] or '')}</div>"
-                  f"<p style='white-space:pre-wrap'>{e(r['summary'])}</p><p><a href='{e(r['url'])}' target=_blank rel=noopener>원문 보기 ›</a></p></section>")
+                  f"<p style='white-space:pre-wrap'>{e(r['summary'])}</p><p><a href='{e(r['url'])}' target=_blank rel=noopener>원문 보기 ›</a></p>{OPN.box(con, 'rich:' + str(r['id']), False)}</section>")
     body = (f"<h1>💰 부자들</h1><p class=meta>매일 웹을 검색해 부자들(고액 자산가·가족사무소·기관급)이 쓰는 투자 방법을 3개씩 요약해 쌓습니다 · 총 {len(rows)}개 · 선택 칸 옆 숫자는 (해당 개수)-오늘 추가된 개수 · "
             "<a href='index.html'>🏠 홈</a></p><p class=meta>요약은 AI가 웹 검색 결과를 정리한 것이라 틀리거나 광고성일 수 있고, 투자 권유가 아닙니다. 판단 전에 원문을 확인하세요.</p>")
     if not rows: body += "<p class=meta>아직 수집된 항목이 없습니다. 다음 새벽 실행에서 3개가 채워집니다.</p>"
@@ -81,5 +82,14 @@ function match(x,k,v){if(v==='all')return true;if(k==='t')return x.dataset.t===v
 sels.forEach(function(s){var k=s.dataset.k;[].forEach.call(s.options,function(o){var n=0,m=0;rows.forEach(function(x){if(match(x,k,o.value)){n++;if(x.dataset.d===td)m++}});o.textContent=o.dataset.l+' ('+n+')-'+m})});
 function apply(){var n=0;rows.forEach(function(x){var ok=sels.every(function(s){return match(x,s.dataset.k,s.value)});x.hidden=!ok;if(ok){n++;x.querySelector('.no').textContent='#'+n+' '}});info.textContent='조건에 맞는 항목 '+n+'개 / 전체 '+rows.length+'개'}
 sels.forEach(function(s){s.onchange=apply});apply()})();</script>"""
-    import opinions as OPN
-    (R.OUT / "rich.html").write_text(R.page("부자들", OPN.LIST_CSS + body + js, "💰"), encoding="utf-8")
+    (R.OUT / "rich.html").write_text(R.page("부자들", OPN.LIST_CSS + OPN.OP_CSS + body + js + OPN.OP_JS, "💰"), encoding="utf-8")
+
+
+def home_block(con):
+    """홈: 오늘 새벽 실행에서 저장한 항목(요약+원문 링크). 없으면 빈 문자열."""
+    rows = con.execute("SELECT * FROM rich_ideas WHERE date=? ORDER BY id", (D.today(),)).fetchall()
+    if not rows: return ""
+    items = "".join(f"<div style='margin:10px 0'><b>{e(r['title'])}</b> <span class=meta>🏷️ {e(r['topic'])} · 📰 기사 {e(r['pub_date'] or '날짜 미확인')} · 🏢 {e(r['source'] or '')}</span>"
+                    f"<div style='white-space:pre-wrap;font-size:14px'>{e(r['summary'])}</div><a href='{e(r['url'])}' target=_blank rel=noopener>원문 보기 ›</a> "
+                    f"<a class=meta href='rich.html#r-{r['id']}'>의견 쓰기·전체 보기 ›</a></div>" for r in rows)
+    return f"<section class=card><h3>💰 오늘의 부자들 투자 방법 ({len(rows)})</h3><p class=meta>오늘 새벽 웹 검색으로 찾은 것입니다. 지난 것은 <a href='rich.html'>부자들 페이지</a>에서 찾아 봅니다.</p>{items}</section>"
