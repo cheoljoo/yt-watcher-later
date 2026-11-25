@@ -199,8 +199,8 @@ def day_block(con, day, vids=()):
          "WHERE o.my_opinion IS NOT NULL AND o.my_opinion<>'' AND (substr(o.ai_at,1,10)=?" + (f" OR o.video_id IN ({','.join('?' * len(vids))})" if vids else "") + ") ORDER BY o.ai_at DESC, o.my_at DESC")
     rows = con.execute(q, (day, *vids)).fetchall()
     if not rows: return ""
-    items = "".join(_item(r, False, "<span class=meta>[어제 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[어제 확인한 항목의 영상]</span> ") for r in rows)
-    return (f"<h4 style='margin:18px 0 4px'>💬 나와 AI 의견 ({len(rows)})</h4><p class=meta>어제({e(day)}) AI 의견이 달린 것과, 어제 확인한 항목의 영상에 남긴 내 의견입니다. 눌러서 펼치세요. <a href='opinions.html'>전체 보기 ›</a></p>"
+    items = "".join(_item(r, False, "<span class=meta>[오늘 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[확인한 항목의 영상]</span> ") for r in rows)
+    return (f"<h4 style='margin:18px 0 4px'>💬 나와 AI 의견 ({len(rows)})</h4><p class=meta>오늘 새벽({e(day)}) AI 의견이 달린 것과, 그때 확인한 항목의 영상에 남긴 내 의견입니다. 눌러서 펼치세요. <a href='opinions.html'>전체 보기 ›</a></p>"
             f"<style>{OI_CSS_BODY}</style>{items}")
 
 

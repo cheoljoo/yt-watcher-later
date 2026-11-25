@@ -15,14 +15,14 @@ import argparse, datetime, hashlib, json, pathlib, shutil, sys
 from jsonschema import Draft202012Validator
 import db as D
 import main as M
-import opinions as OP, indicators as I, autocheck as A, events as EVT, report, export_json
+import opinions as OP, indicators as I, autocheck as A, events as EVT, rich as RICH, report, export_json
 from analyze import SCHEMA as VIDEO_SCHEMA, build_request, CATEGORIES
 from fetcher import collect_many, write_log
 
 W = pathlib.Path("data/_work")
 COL, TASKS, INP, SCH, STATE = W / "col", W / "tasks", W / "in", W / "schema", W / "state.json"
-STAGES = ["video", "enrich", "map", "meaning", "phase", "check", "checkfill", "opinion", "events"]
-SCHEMAS = {"video": VIDEO_SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA, "checkfill": A.FILL_SCHEMA, "opinion": OP.SCHEMA, "events": EVT.SCHEMA}
+STAGES = ["video", "enrich", "map", "meaning", "phase", "check", "checkfill", "opinion", "events", "rich"]
+SCHEMAS = {"video": VIDEO_SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA, "checkfill": A.FILL_SCHEMA, "opinion": OP.SCHEMA, "events": EVT.SCHEMA, "rich": RICH.SCHEMA}
 MAX_TRANSCRIPT = 60000      # 자막이 이보다 길면 앞·뒤만 남김(컨텍스트 보호). 중앙값은 약 9천자.
 cfg = M.cfg
 import os
@@ -125,7 +125,12 @@ def gen_events(con, st):
     for ch in chunks(weeks, EVT.CHUNK): write_task("events", ch, EVT.PROMPT, EVT.task_body(ch))
     st["events_gen"] = D.today(); save_state(st)
 
-GEN = {"video": gen_video, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion, "events": gen_events}
+def gen_rich(con, st):
+    """부자들 페이지: 오늘 항목이 3개 안 되면 웹 검색으로 부자들의 투자 방법을 찾는 작업 1건."""
+    if "rich" in tried(st, "rich") or not RICH.need_today(con): return
+    write_task("rich", ["rich"], RICH.prompt(), RICH.task_body(con))
+
+GEN = {"video": gen_video, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion, "events": gen_events, "rich": gen_rich}
 
 
 # ── 명령 ────────────────────────────────────────────────────────
@@ -231,6 +236,7 @@ def cmd_submit(a):
     elif kind == "opinion": msg = f"AI 의견 {OP.apply_ai(con, data['items'])}건"
     elif kind == "checkfill": msg = f"예상 맞을 때/틀릴 때 {A.apply_fill(con, data['items'])}건"
     elif kind == "check": msg = f"자동 판정 {A.apply(con, data['items'])}건"
+    elif kind == "rich": msg = f"부자들 투자 방법 {RICH.apply(con, data)}건"
     elif kind == "events": msg = f"큰 일 {EVT.apply(con, data)}건 ({len(data['weeks'])}주)"
     mark_tried(st, kind, t["keys"]); st["round_submitted"] += 1; st["total_submitted"] = st.get("total_submitted", 0) + 1
     save_state(st); tf.unlink(); (INP / f"{a.tid}.txt").unlink(missing_ok=True)

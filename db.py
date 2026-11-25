@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS indicator_values(
 CREATE TABLE IF NOT EXISTS macro_daily(date TEXT PRIMARY KEY, phase_index INTEGER, phase TEXT, reason TEXT);
 CREATE TABLE IF NOT EXISTS dup_seen(video_id TEXT, owner TEXT, playlist_name TEXT, seen_at TEXT, PRIMARY KEY(video_id, owner, playlist_name));  -- 이미 분석된 영상이 다른 재생목록에도 저장돼 있음을 기록(분석은 건너뜀)
 CREATE TABLE IF NOT EXISTS week_events(week TEXT, region TEXT, date TEXT, title TEXT, detail TEXT, category TEXT, llm TEXT, searched_at TEXT, PRIMARY KEY(week, region));  -- 주(월요일)·지역(한국/미국/세계)마다 경제·시장에 가장 큰 영향을 준 일 1개(웹 검색으로 채움, title 이 빈 문자열이면 조사했으나 큰 일 없음). 지표 추이의 중요한 날·보라 띠 설명에 쓴다
+CREATE TABLE IF NOT EXISTS rich_ideas(id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, topic TEXT, title TEXT, summary TEXT, url TEXT UNIQUE, source TEXT, who TEXT, llm TEXT, created_at TEXT, pub_date TEXT);  -- 부자들이 쓰는 투자 방법(하루 3개, 웹 검색 요약 + 원문 링크). 부자들 페이지에 쓴다
 CREATE TABLE IF NOT EXISTS opinions(video_id TEXT PRIMARY KEY, my_opinion TEXT, my_at TEXT, ai_reply TEXT, ai_llm TEXT, ai_at TEXT);  -- 나의 의견(리포트 저장 버튼) / AI 의견(cron 이 채움)
 CREATE TABLE IF NOT EXISTS actions(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT, comment TEXT, comment_at TEXT);  -- '직접 해봐야 할 것' 표시(리포트 액션 버튼) + 해보고 남긴 의견
 CREATE TABLE IF NOT EXISTS backlog(video_id TEXT PRIMARY KEY, title TEXT, owner TEXT, playlist_name TEXT, pos INTEGER, seen_at TEXT);  -- 재생목록에 있으나 아직 분석 안 된 영상(collect 때 갱신)
@@ -92,7 +93,7 @@ def connect():
     ccols = {r[1] for r in db.execute("PRAGMA table_info(checks)")}
     for name in ("rationale", "created_at", "if_right", "if_wrong", "since_upload"):   # 예상이 맞을 때/틀릴 때 행동, 업로드 시점→확인일 변화
         if name not in ccols: db.execute(f"ALTER TABLE checks ADD COLUMN {name} TEXT")
-    for tbl, col in (("indicator_values", "llm"), ("macro_daily", "llm")):          # 어떤 AI(엔진 · 모델)가 만든 값인가
+    for tbl, col in (("indicator_values", "llm"), ("macro_daily", "llm"), ("rich_ideas", "pub_date")):          # 어떤 AI(엔진 · 모델)가 만든 값인가
         if col not in {r[1] for r in db.execute(f"PRAGMA table_info({tbl})")}: db.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT")
     icols = {r[1] for r in db.execute("PRAGMA table_info(indicators)")}
     for name in ("source", "symbol", "mapped_at", "alias_of", "enrich_llm", "map_llm"):

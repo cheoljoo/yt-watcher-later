@@ -170,6 +170,7 @@ def how_block():
              ("seodaeri.html","📺 서대리TV 투자 방식","규칙·매매 이력 차트·따라 하는 법·지금 상태(매일 갱신)"),
              ("kimyoungik.html","🎓 김영익 교수 투자 방식","교재+영상: 국면별 비중·점검 지표·지금 상태(매일 갱신)"),
              ("seojunsik.html","🏛️ 서준식 교수 투자 방식","채권형 주식 계산기·자산배분 원칙·금리 기준·지금 상태"),
+             ("rich.html","💰 부자들","부자들이 쓰는 투자 방법 매일 3개(요약+원문 링크)"),
              ("leading.html","🧭 선행지수 정리","선행지표의 방향·투자 의견·선행 관계 그래프(시차 슬라이더)"),
              ("watchlater.json","🧾 전체 데이터","JSON")]
     smap = "".join(f"<a class=n href='{u}'><b>{t}</b><small>{d}</small></a>" for u, t, d in pages)
@@ -188,16 +189,16 @@ def build_all(con):
         who = ", ".join(r[0] or "-" for r in con.execute("SELECT DISTINCT owner FROM videos WHERE COALESCE(run_id,processed_date)=? AND status='done'", (d,)))
         rows += f"<tr><td><a href='{d}.html'>{d}</a><td>{n}<td>👤 {e(who)}<td>{' '.join(CAT_ICON.get(x, '📌') + e(x) for x in (cats or '').split(','))}</tr>"
     pend = con.execute("SELECT count(*) FROM checks WHERE status='pending'").fetchone()[0]
-    last = con.execute("SELECT max(checked_at) FROM checks WHERE checked_at IS NOT NULL").fetchone()[0]
-    yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall() if last else []
+    last = D.today()          # 오늘 새벽 실행에서 처리된 것만 홈에 보여준다(지난 날의 것은 확인한 것·나와 AI 의견 페이지에서 찾아 본다)
+    yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall()
     late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
-    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='rich.html'>💰 부자들</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     body += how_block()
     body += backlog_block(con)
     import opinions as OPN
-    opn = OPN.day_block(con, last[:10], {c["video_id"] for c in yday}) if last else ""
+    opn = OPN.day_block(con, last, {c["video_id"] for c in yday})
     if yday: body += f"<section class=card><h3>✅ 어제 확인한 항목 ({len(yday)})</h3><p class=meta>확인일이 어제까지인 항목을 {e(last[:10])} 새벽 실행에서 AI가 판정한 결과입니다. 오늘 날짜 항목은 내일 새벽에 확인합니다.</p>" + checks_table(yday, True) + opn + "</section>"
-    elif opn: body += f"<section class=card><h3>💬 어제 달린 AI 의견</h3>{opn}</section>"
+    elif opn: body += f"<section class=card><h3>💬 오늘 달린 AI 의견</h3>{opn}</section>"
     if late: body += f"<section class='card due'><h3>🟠 확인일이 지났지만 아직 확인 못 한 항목 ({len(late)})</h3><p class=meta>사용량 한도 등으로 못 한 것은 다음 실행에서 이어서 확인합니다.</p>" + checks_table(late, True) + "</section>"
     body += f"<table id=runs><tr><th>🗓️ 처리(날짜_시분-LLM)<th>영상 수<th>저장한 사람<th>카테고리</tr>{rows}</table>"
     (OUT / "index.html").write_text(page("WL 리포트", body), encoding="utf-8")
@@ -211,5 +212,6 @@ def build_all(con):
     import seojunsik; seojunsik.build(con)
     import leading; leading.build(con)
     import opinions; opinions.build(con)
+    import rich; rich.build(con)
     import actions; actions.build(con)
     print(f"리포트 생성: {OUT.resolve()}/index.html ({len(days)}일)", flush=True)
