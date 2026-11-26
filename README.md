@@ -103,6 +103,12 @@ Apache License 2.0 — [LICENSE](LICENSE) 참고.
 ## DB 백업/복구
 `uv run dbbackup.py dump` 는 DB 를 `~/yt-watcher-later-backup`(또는 `$YT_BACKUP_DIR`)에 `schema.sql` + 표별 `<표>.jsonl`(행당 한 줄, 기본키 순)로 저장한다. 바뀐 행만 git diff 에 나타난다. 폴더가 있으면 `work.py finish` 가 덤프하고, `run_skill.sh` 끝에서 `dbbackup.py sync` 가 README.md·HISTORY.md(백업 시각·변경 내역) 갱신 + 백업 저장소 commit·push 까지 자동으로 한다(`make backup-push` 로 수동 실행). 복구: `uv run dbbackup.py restore 백업폴더 새DB경로`, 비교: `verify`. 개인 의견·자막이 들어 있으므로 공개 저장소가 아닌 별도 비공개 저장소에 둘 것.
 
+- **이 방식을 선택한 이유**:
+  - **Git LFS 대신 일반 Git 텍스트 증분 사용**: GitHub 무료 계정의 Git LFS는 스토리지 10GiB / 월 대역폭 10GiB 제한이 있고, 바이너리는 커밋마다 파일 전체가 새로 누적된다(예: 350MB DB를 매일 커밋하면 한 달에 10GiB를 초과). 반면 일반 Git은 텍스트의 바뀐 줄(diff)만 압축 저장하므로 DB 전체 크기가 커져도 매일 추가되는 증분만큼만 쌓여 무료 한도 안에서 장기간 유지할 수 있다.
+  - **단일 파일 100MB 제한 대응**: GitHub은 단일 파일 50MB 초과 시 경고, 100MB 초과 시 push를 차단한다. 이를 피하기 위해 `dbbackup.py`는 표 하나가 40MB를 넘으면 약 25MB 단위의 여러 조각(`<표>.s00.jsonl`, `.s01.jsonl` …)으로 자동 분할하며, 기본키 해시로 조각을 배정해 행이 늘어나도 기존 행이 제자리에 유지되도록 설계했다.
+- **향후 `.git` 크기가 문제가 될 때의 대안 (GitHub Releases)**:
+  - 장기 운영으로 `.git` 히스토리 자체가 커져 부담이 되면, 비공개 백업 저장소의 **GitHub Releases**에 `latest` 태그만 유지하면서 SQLite 스냅샷(`sqlite3 ... ".backup ..."` 후 압축)을 `gh release upload latest <파일> --clobber`로 덮어쓰는 방식으로 전환하면 된다(파일당 최대 2GB, LFS 한도 미사용, 히스토리 미누적).
+
 ## 자막을 못 받을 때 (YouTube 429)
 - 영상 정보(제목·설명·댓글)는 받았는데 자막 요청만 429 로 막히면 영상을 실패 처리하지 않는다. 제목·설명·댓글만으로 분석하고 `transcript_status='meta_only'` 로 표시한다(카드에 📝 '자막을 받지 못해 … 내용 정확도가 낮습니다').
 - 다음 날부터 자막만 다시 받아 보고(최대 5회), 받으면 그 영상을 다시 분석해 `ok` 로 바꾼다. 5회 실패하면 `gave_up`.
