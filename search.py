@@ -34,6 +34,8 @@ def build(con):
 CORE_JS = r"""
 function ytId(q){var m=q.match(/(?:[?&]v=|youtu\.be\/|\/shorts\/|\/live\/|\/embed\/)([A-Za-z0-9_-]{11})/);return m?m[1]:null}
 function norm(s){return (s||'').normalize('NFC').toLowerCase()}
+// 소문자·정규화는 영상마다 처음 한 번만 해 두고 다시 쓴다(검색할 때마다 전체 글을 바꾸지 않게)
+function prep(x){return x._n||(x._n={t:norm(x.t),k:norm(x.k),c:norm(x.c),r:norm((x.o||'')+' '+(x.s||'')+' '+(x.g||''))})}
 function find(data,q){
   q=q.trim(); if(!q) return {items:[],note:''};
   var id=ytId(q), bare=/^[A-Za-z0-9_-]{11}$/.test(q)&&data.some(function(x){return x.i===q});
@@ -42,7 +44,7 @@ function find(data,q){
   var toks=norm(q).split(/[\s|│·,]+/).filter(function(t){return t.length>0});
   if(!toks.length) return {items:[],note:''};
   var scored=data.map(function(x){
-    var t=norm(x.t),k=norm(x.k),c=norm(x.c),rest=norm((x.o||'')+' '+(x.s||'')+' '+(x.g||'')),n=0,sc=0;
+    var z=prep(x),t=z.t,k=z.k,c=z.c,rest=z.r,n=0,sc=0;
     toks.forEach(function(w){var s=0;if(t.indexOf(w)>=0)s=10;else if(k.indexOf(w)>=0)s=4;else if(c.indexOf(w)>=0)s=3;else if(rest.indexOf(w)>=0)s=1;if(s){n++;sc+=s}});
     return {x:x,n:n,sc:sc}});
   var all=scored.filter(function(r){return r.n===toks.length}), note='';
@@ -55,7 +57,7 @@ function find(data,q){
 UI_JS = r"""
 (function(){
 var inp=document.getElementById('sq'),out=document.getElementById('sres'),data=null,loading=null,limit=20,timer=null;
-function load(){if(!loading)loading=fetch('search_index.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){data=d;return d}).catch(function(){loading=null;out.textContent='검색 색인을 불러오지 못했습니다'});return loading}
+function load(){if(!loading)loading=fetch('search_index.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){d.forEach(prep);data=d;return d}).catch(function(){loading=null;out.textContent='검색 색인을 불러오지 못했습니다'});return loading}
 function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function link(text,href,blank){var a=el('a',null,text);a.href=href;if(blank){a.target='_blank';a.rel='noopener'}return a}
 function render(){
