@@ -118,7 +118,8 @@ def build(con=None, refresh_prices=True):
     row = con.execute("SELECT data_json, updated_at FROM research WHERE slug=?", (SLUG,)).fetchone()
     if not row:
         do_import(con); row = con.execute("SELECT data_json, updated_at FROM research WHERE slug=?", (SLUG,)).fetchone()
-    if refresh_prices:
+    import os
+    if refresh_prices and not os.environ.get("YT_NO_FETCH"):      # 서비스 서버는 시세를 받지 않고 복원한 DB 값으로만 만든다
         try: refresh(con)
         except Exception as ex: print("  서대리 가격 갱신 실패:", ex)
     d = json.loads(row["data_json"])

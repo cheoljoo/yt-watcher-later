@@ -1,9 +1,10 @@
 """의견 저장 서버(로컬 127.0.0.1:8650). nginx 가 /yt_watch_later/api/ 를 여기로 프록시한다.
  POST /save {id,text} · /action {id,on} · /action_comment {id,text} · /star {id,on}  (헤더 X-Token 필요)   GET /opinions, /actions, /stars -> JSON
+ 서비스 서버(role.py 가 service)에서는 저장이 성공할 때마다 inbox 에도 한 줄 쌓는다(개발 서버가 가져가 원본 DB 에 반영).
 토큰: ~/.config/yt-watcher-later/token (프로젝트 밖, git 에 올리지 않음).   실행: uv run opinion_server.py"""
 import hmac, json, os, pathlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import db as D, opinions as O
+import db as D, opinions as O, inbox, role
 
 PORT = int(os.environ.get("OPINION_PORT", "8650"))
 TOKEN_FILE = pathlib.Path.home() / ".config" / "yt-watcher-later" / "token"
@@ -40,6 +41,9 @@ class H(BaseHTTPRequestHandler):
             elif path == "/action": ok, msg = O.set_action(con, vid, on)
             elif path == "/star": ok, msg = O.set_star(con, vid, on)
             else: ok, msg = O.save_action_comment(con, vid, text)
+            if ok and role.role() == "service":     # 개발 서버로 보낼 입력을 inbox 에 쌓는다(분리 전 legacy 에서는 쌓지 않음 — 이미 같은 DB 가 원본)
+                try: inbox.append({"/save": "opinion", "/action": "action", "/star": "star"}.get(path, "action_comment"), vid, text=text, on=on)
+                except Exception as ex: print("inbox 기록 실패:", ex, flush=True)
             if ok:
                 try:                       # 해당 페이지 즉시 갱신
                     if path == "/save": O.build(con)

@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS macro_daily(date TEXT PRIMARY KEY, phase_index INTEGE
 CREATE TABLE IF NOT EXISTS dup_seen(video_id TEXT, owner TEXT, playlist_name TEXT, seen_at TEXT, PRIMARY KEY(video_id, owner, playlist_name));  -- 이미 분석된 영상이 다른 재생목록에도 저장돼 있음을 기록(분석은 건너뜀)
 CREATE TABLE IF NOT EXISTS week_events(week TEXT, region TEXT, date TEXT, title TEXT, detail TEXT, category TEXT, llm TEXT, searched_at TEXT, PRIMARY KEY(week, region));  -- 주(월요일)·지역(한국/미국/세계)마다 경제·시장에 가장 큰 영향을 준 일 1개(웹 검색으로 채움, title 이 빈 문자열이면 조사했으나 큰 일 없음). 지표 추이의 중요한 날·보라 띠 설명에 쓴다
 CREATE TABLE IF NOT EXISTS rich_ideas(id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, topic TEXT, title TEXT, summary TEXT, url TEXT UNIQUE, source TEXT, who TEXT, llm TEXT, created_at TEXT, pub_date TEXT);  -- 부자들이 쓰는 투자 방법(하루 3개, 웹 검색 요약 + 원문 링크). 부자들 페이지에 쓴다
+CREATE TABLE IF NOT EXISTS inbox_applied(id TEXT PRIMARY KEY, ts TEXT, type TEXT, vid TEXT, ok INTEGER, msg TEXT, applied_at TEXT);  -- 개발 서버가 서비스 서버 inbox 에서 반영한 이벤트(중복 방지·거부 사유 기록)
 CREATE TABLE IF NOT EXISTS opinions(video_id TEXT PRIMARY KEY, my_opinion TEXT, my_at TEXT, ai_reply TEXT, ai_llm TEXT, ai_at TEXT);  -- 나의 의견(리포트 저장 버튼) / AI 의견(cron 이 채움)
 CREATE TABLE IF NOT EXISTS actions(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT, comment TEXT, comment_at TEXT);  -- '직접 해봐야 할 것' 표시(리포트 액션 버튼) + 해보고 남긴 의견
 CREATE TABLE IF NOT EXISTS backlog(video_id TEXT PRIMARY KEY, title TEXT, owner TEXT, playlist_name TEXT, pos INTEGER, seen_at TEXT);  -- 재생목록에 있으나 아직 분석 안 된 영상(collect 때 갱신)
