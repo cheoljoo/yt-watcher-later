@@ -20,22 +20,22 @@ YouTube 재생목록(예: `my-watch-later`)에 저장해 둔 영상을 매일 �
 (3) 결과를 DB에 저장한다. 실패한 영상은 다음 실행에서 다시 시도하고, 구독 사용량 한도(429)가 나오면 남은 분석을 안전하게 미룬다.
 각 영상에는 저장한 사람(`owner`)과 재생목록 이름이 기록되고 리포트에 표시된다.
 
-## 두 가지 역할: 개발 서버 / 서비스 서버
+## 두 가지 역할: 개발 및 AI 실행 서버 / 서비스 서버
 
-빠른 **개발 서버**가 수집·AI 분석·DB 갱신을 모두 맡고, 느린 **서비스 서버(psncs)** 는 웹 서비스와 사용자 입력 받기만 한다. 둘은 **백업 저장소(git)** 와 **inbox 파일**로만 이어진다.
+빠른 **개발 및 AI 실행 서버**가 수집·AI 분석·DB 갱신을 모두 맡고, 느린 **서비스 서버(psncs)** 는 웹 서비스와 사용자 입력 받기만 한다. 둘은 **백업 저장소(git)** 와 **inbox 파일**로만 이어진다.
 같은 코드를 두 곳에 두고, 실행하는 컴퓨터가 어느 역할인지는 코드가 스스로 판단한다(`role.py`).
 
-| | 개발 서버 (`dev`) | 서비스 서버 (`service`, psncs) |
+| | 개발 및 AI 실행 서버 (`dev`) | 서비스 서버 (`service`, psncs) |
 |---|---|---|
 | 하는 일 | 수집·AI 분석·확인 판정·리포트 생성, **DB 원본** | 웹 서비스(nginx + `opinion_server.py`), 사용자 입력 받기 |
 | 매일 | cron 01:00 `run_skill.sh --agy` | cron 10분마다 `service_sync.py` (백업 pull → 복원) |
-| DB | 원본. 서비스 서버 입력(inbox)을 맨 처음 반영한 뒤 AI 작업 | 백업에서 **다시 만든 사본**(입력은 고쳐도 다음 복원 때 덮어써짐 — 이미 inbox 로 개발 서버에 갔으므로 상관없음) |
+| DB | 원본. 서비스 서버 입력(inbox)을 맨 처음 반영한 뒤 AI 작업 | 백업에서 **다시 만든 사본**(입력은 고쳐도 다음 복원 때 덮어써짐 — 이미 inbox 로 개발 및 AI 실행 서버에 갔으므로 상관없음) |
 | 백업 | 끝날 때 덤프 → `BACKUP_TIME` 기록 → commit·push | **pull 만** 한다(읽기 전용 사본). `BACKUP_TIME` 2행(만든 컴퓨터)이 **자기 자신이면 복원하지 않는다** — 자기 DB 가 더 새것이라서 |
 | 갱신 전 DB 사본 | 일일 실행 시작 때 `data/watchlater.db.bak` 한 개(덮어씀) | 새 백업이 확인돼 **교체하기 직전에만** `data/watchlater.db.bak` 한 개(덮어씀) |
 | 입력(의견·액션·별표) | 서비스 서버 inbox 를 가져와 DB 에 반영하고 ack | 저장하면 DB 와 **inbox 에 한 줄씩 쌓는다** |
 
 **역할 판단** (`uv run role.py --why`, `make role`): 환경변수 `YT_ROLE` → 파일 `~/.config/yt-watcher-later/role` → `config.toml` 의 `service_hostnames` 에 이 컴퓨터 이름이 있으면 `service`, 없으면 `dev`.
-`config.toml` 의 `split_from`(분리 시작 시각) **전에는** 서비스 서버도 예전처럼 전부 한다(`legacy`). 개발 서버는 그 시각 전에는 실행하지 않는다. 현재 `split_from = "2026-11-27 06:00"` — 11/27 01:00 새벽 실행까지는 psncs 가 기존과 똑같이 돈다.
+`config.toml` 의 `split_from`(분리 시작 시각) **전에는** 서비스 서버도 예전처럼 전부 한다(`legacy`). 개발 및 AI 실행 서버는 그 시각 전에는 실행하지 않는다. 현재 `split_from = "2026-11-27 06:00"` — 11/27 01:00 새벽 실행까지는 psncs 가 기존과 똑같이 돈다.
 
 ### 구조도
 
@@ -61,7 +61,7 @@ flowchart LR
         BK["schema.sql + 표별 *.jsonl<br/>BACKUP_TIME(백업이 끝난 시각)<br/>README · HISTORY"]
     end
 
-    subgraph DEV["⚙️ 개발 서버 — AI 작업 + DB 원본"]
+    subgraph DEV["⚙️ 개발 및 AI 실행 서버 — AI 작업 + DB 원본"]
         direction TB
         CRON["cron 01:00<br/>run_skill.sh --agy"]
         APPLY["inbox_apply.py<br/>ssh 닫기 → scp 가져오기<br/>→ DB 반영 → ssh 삭제"]
@@ -87,9 +87,9 @@ flowchart LR
 ```mermaid
 flowchart TD
     A["👤 낮: 사용자가 서비스 서버에서<br/>의견 저장 · 액션 · 별표 클릭"] --> B["서비스 서버: DB 에 즉시 반영(화면에 바로 보임)<br/>+ inbox/current.jsonl 에 이벤트 한 줄 append"]
-    B --> C{"개발 서버 cron 01:00 시작"}
+    B --> C{"개발 및 AI 실행 서버 cron 01:00 시작"}
     C --> D["① inbox_apply.py: ssh 로 서비스 서버에서 <code>inbox.py close</code><br/>쌓던 파일을 닫고(이름 변경) 닫힌 파일 목록을 받음<br/>※ 이후 도착하는 입력은 새 current 에 쌓임"]
-    D --> D2["② scp 로 닫힌 파일을 개발 서버로 가져옴"]
+    D --> D2["② scp 로 닫힌 파일을 개발 및 AI 실행 서버로 가져옴"]
     D2 --> E["③ 이벤트 id 로 중복을 걸러 시각순으로 개발 DB 에 반영<br/>(AI 의견이 이미 달린 항목 수정 등은 거부, 사유 기록: 표 inbox_applied)"]
     E --> F["④ DB commit 뒤에만 ssh 로 <code>inbox.py ack</code> —<br/>반영한 닫힌 파일만 서비스 서버에서 삭제"]
     F --> G["⑤ 수집 → AI 분석 → 지표 시세 → 확인 판정 → 의견 답 → 리포트 생성"]
@@ -104,20 +104,20 @@ flowchart TD
 ```
 
 **문제가 생기면 어디를 볼까**
-- `make backup-status` — 백업 저장소의 마지막 백업 시각(`BACKUP_TIME`)과 서비스 서버가 마지막으로 복원한 시각. 둘이 다르면 아직 복원 전, 백업 시각이 오래됐으면 개발 서버 쪽에서 멈춘 것이다.
-- `make inbox-status`(서비스 서버) — 개발 서버가 아직 안 가져간 입력 수. 계속 쌓이면 개발 서버가 안 도는 것.
-- 개발 서버 `logs/daily.log`(inbox 반영 줄·백업 push 줄), 서비스 서버 `logs/service.log`.
+- `make backup-status` — 백업 저장소의 마지막 백업 시각(`BACKUP_TIME`)과 서비스 서버가 마지막으로 복원한 시각. 둘이 다르면 아직 복원 전, 백업 시각이 오래됐으면 개발 및 AI 실행 서버 쪽에서 멈춘 것이다.
+- `make inbox-status`(서비스 서버) — 개발 및 AI 실행 서버가 아직 안 가져간 입력 수. 계속 쌓이면 개발 및 AI 실행 서버가 안 도는 것.
+- 개발 및 AI 실행 서버 `logs/daily.log`(inbox 반영 줄·백업 push 줄), 서비스 서버 `logs/service.log`.
 - 백업 저장소 `HISTORY.md` — 백업마다 한 줄(시각·행 수·바뀐 표).
 
 ### 처음 설정과 자주 쓰는 명령
 | 대상 | 명령 |
 |---|---|
-| 개발 서버 처음 한 번 | `make dev-init` (백업 저장소 clone + DB 복원) → 프로젝트 폴더에 **`.env`**(필수) 를 만들고 `PSNCS_HOST`·`PSNCS_ID`·`PSNCS_YT_WATCH_DIR`(필수; 선택 `PSNCS_PORT`·`PSNCS_PASSWD`·`PSNCS_SSH_OPTS`) 기재 → `make inbox-dry`(ssh 연결 확인) → `make cron-dev`. **`.env` 가 없거나 `PSNCS_*` 필수 값이 없으면 `inbox_apply.py` 가 오류(종료코드 2)를 내고 `run_skill.sh` 가 개발 서버 실행을 멈춘다.** 접속은 ssh 키(권장) 또는 `PSNCS_PASSWD`(`sshpass` 필요: `sudo apt install sshpass`)로 한다 |
+| 개발 및 AI 실행 서버 처음 한 번 | `make dev-init` (백업 저장소 clone + DB 복원) → 프로젝트 폴더에 **`.env`**(필수) 를 만들고 `PSNCS_HOST`·`PSNCS_ID`·`PSNCS_YT_WATCH_DIR`(필수; 선택 `PSNCS_PORT`·`PSNCS_PASSWD`·`PSNCS_SSH_OPTS`) 기재 → `make inbox-dry`(ssh 연결 확인) → `make cron-dev`. **`.env` 가 없거나 `PSNCS_*` 필수 값이 없으면 `inbox_apply.py` 가 오류(종료코드 2)를 내고 `run_skill.sh` 가 개발 및 AI 실행 서버 실행을 멈춘다.** 접속은 ssh 키(권장) 또는 `PSNCS_PASSWD`(`sshpass` 필요: `sudo apt install sshpass`)로 한다 |
 | 서비스 서버 처음 한 번 | `make cron-service` (10분마다 `service_sync.py`; 분리가 끝나면 예전 01:00 `run_skill.sh` 줄은 지운다) → `make opinion-restart`(입력 서버가 inbox 를 쌓도록 코드 반영) |
 | 상태 확인 | `make role` · `make backup-status` · `make inbox-status` |
 | 수동 실행 | 개발: `make daily` · `make inbox-apply` / 서비스: `make service-sync` · `make service-force` |
 
-### 개발 서버 `.env` 예
+### 개발 및 AI 실행 서버 `.env` 예
 ```
 PSNCS_HOST='psncs.iptime.org'
 PSNCS_ID='cheoljoo'
@@ -126,15 +126,17 @@ PSNCS_PORT=22443
 # PSNCS_PASSWD='...'          # 비밀번호 접속일 때만(sshpass 필요). 가능하면 ssh 키를 등록하고 이 줄은 쓰지 않는다
 # PSNCS_SSH_OPTS=-i ~/.ssh/id_ed25519
 ```
+컴퓨터마다 다른 실행 설정(예: `agy` 에만 프록시 적용)은 `~/.config/yt-watcher-later/run.env` 에 셸 문법으로 적는다(있으면 `run_skill.sh` 가 읽는다). cron 은 `~/.bashrc` 를 읽지 않는다.
+
 `.env` 는 git 에 올라가지 않는다(.gitignore). 이름은 `ssh`/`scp` 가 접속하는 곳일 뿐이라, 서비스 서버 쪽에는 이 값이 필요 없다.
 
 ### 내일(11/27) 새벽 이후 단계별 확인 순서
 1. **(01:00 이후) psncs**: 평소처럼 돈 기록 확인 — `tail logs/daily.log`("DB 백업 … push 완료"), `make backup-status`(백업 시각이 오늘 새벽).
 2. **psncs**: `make role` → 06:00 이후면 `service`. `make cron-service`(10분마다 복원 확인) 와 `make opinion-restart`(입력 서버가 새 코드로 inbox 를 쌓도록) 실행. 이후 브라우저에서 의견·별표를 하나 눌러 보고 `make inbox-status` 가 1건 이상인지 확인.
-3. **개발 서버**: `make dev-init`(백업 clone + DB 복원) → `.env` 작성 → `make role`(`dev`) → `make inbox-dry`(ssh 로 쌓인 입력 개수가 보이는지).
-4. **개발 서버**: `make inbox-apply`(2번에서 누른 입력이 반영되고 psncs 의 파일이 지워지는지) → `make daily`(전체 한 번 돌려 백업 push 까지) → 로그에서 inbox 줄과 push 줄 확인.
+3. **개발 및 AI 실행 서버**: `make dev-init`(백업 clone + DB 복원) → `.env` 작성 → `make role`(`dev`) → `make inbox-dry`(ssh 로 쌓인 입력 개수가 보이는지).
+4. **개발 및 AI 실행 서버**: `make inbox-apply`(2번에서 누른 입력이 반영되고 psncs 의 파일이 지워지는지) → `make daily`(전체 한 번 돌려 백업 push 까지) → 로그에서 inbox 줄과 push 줄 확인.
 5. **psncs**: 10분 안에(또는 `make service-sync`) 새 백업 시각을 보고 복원했는지 — `make backup-status` 에서 두 시각이 같아지고 `logs/service.log` 에 "복원 완료".
-6. **개발 서버**: `make cron-dev` 로 매일 01:00 등록. (psncs 는 2026-11-27 에 예전 01:00 `run_skill.sh` 줄을 지우고 10분 `service_sync.py` 줄만 남겼다.)
+6. **개발 및 AI 실행 서버**: `make cron-dev` 로 매일 01:00 등록. (psncs 는 2026-11-27 에 예전 01:00 `run_skill.sh` 줄을 지우고 10분 `service_sync.py` 줄만 남겼다.)
 
 **입력 서버를 고쳤거나 `git pull` 한 뒤에는 반드시 `make opinion-restart`** — 떠 있는 서버는 옛 코드로 계속 돌아 inbox 를 쌓지 않을 수 있다.
 

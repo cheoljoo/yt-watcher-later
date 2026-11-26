@@ -4,9 +4,10 @@
 # 사용:  ./run_skill.sh [--claude | --agy] [--no-collect] [--no-finish] [--retry-failed]      (기본 --claude)
 #   --claude  Claude Code(`claude -p /yt-daily`)로 처리      --agy  agy CLI(`agy -p /yt-daily`)로 처리
 # 환경변수: ROUNDS(기본 4) BUDGET(세션 입력 상한, 기본 70만자) MAX_ANALYZE(영상 분석 상한) AGY_MODEL(agy 모델, 비우면 agy 기본값)
-export PATH="/home/cheoljoo/.claude-wrapper/bin:/home/cheoljoo/.local/bin:/usr/bin:/bin"
+export PATH="$HOME/.claude-wrapper/bin:$HOME/.local/bin:/usr/bin:/bin"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+[ -f "$HOME/.config/yt-watcher-later/run.env" ] && . "$HOME/.config/yt-watcher-later/run.env"   # 컴퓨터마다 다른 설정(프록시 등)
 TOOL=claude; COLLECT=1; FINISH=1; RETRY=0
 for a in "$@"; do case "$a" in
   --claude) TOOL=claude;; --agy) TOOL=agy;; --no-collect) COLLECT=0;; --no-finish) FINISH=0;; --retry-failed) RETRY=1;;
