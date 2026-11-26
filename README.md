@@ -30,7 +30,8 @@ YouTube 재생목록(예: `my-watch-later`)에 저장해 둔 영상을 매일 �
 | 하는 일 | 수집·AI 분석·확인 판정·리포트 생성, **DB 원본** | 웹 서비스(nginx + `opinion_server.py`), 사용자 입력 받기 |
 | 매일 | cron 01:00 `run_skill.sh --agy` | cron 10분마다 `service_sync.py` (백업 pull → 복원) |
 | DB | 원본. 서비스 서버 입력(inbox)을 맨 처음 반영한 뒤 AI 작업 | 백업에서 **다시 만든 사본**(입력은 고쳐도 다음 복원 때 덮어써짐 — 이미 inbox 로 개발 서버에 갔으므로 상관없음) |
-| 백업 | 끝날 때 덤프 → `BACKUP_TIME` 기록 → commit·push | **pull 만** 한다(읽기 전용 사본) |
+| 백업 | 끝날 때 덤프 → `BACKUP_TIME` 기록 → commit·push | **pull 만** 한다(읽기 전용 사본). `BACKUP_TIME` 2행(만든 컴퓨터)이 **자기 자신이면 복원하지 않는다** — 자기 DB 가 더 새것이라서 |
+| 갱신 전 DB 사본 | 일일 실행 시작 때 `data/watchlater.db.bak` 한 개(덮어씀) | 새 백업이 확인돼 **교체하기 직전에만** `data/watchlater.db.bak` 한 개(덮어씀) |
 | 입력(의견·액션·별표) | 서비스 서버 inbox 를 가져와 DB 에 반영하고 ack | 저장하면 DB 와 **inbox 에 한 줄씩 쌓는다** |
 
 **역할 판단** (`uv run role.py --why`, `make role`): 환경변수 `YT_ROLE` → 파일 `~/.config/yt-watcher-later/role` → `config.toml` 의 `service_hostnames` 에 이 컴퓨터 이름이 있으면 `service`, 없으면 `dev`.
@@ -95,8 +96,8 @@ flowchart TD
     G --> H["⑥ dbbackup.py sync<br/>덤프 → README·HISTORY·<b>BACKUP_TIME</b> 갱신 → commit → git gc → push"]
     H --> I["서비스 서버 cron (10분마다): git fetch + reset --hard"]
     I --> J{"BACKUP_TIME 이<br/>지난번 복원한 것과 다른가?"}
-    J -- "같음" --> K["아무것도 안 함 (기존 DB 로 계속 서비스)"]
-    J -- "다름" --> L["⑦ 새 파일(watchlater.db.new)로 복원 → 행 수 검증<br/>→ os.replace 로 한 번에 교체"]
+    J -- "같음 (또는 자기가 만든 백업)" --> K["아무것도 안 함 (기존 DB 로 계속 서비스)"]
+    J -- "다름" --> L["⑦ 새 파일(watchlater.db.new)로 복원 → 행 수 검증<br/>→ 기존 DB 를 watchlater.db.bak 으로 복사 → os.replace 로 교체"]
     L --> M["⑧ 리포트 다시 만들기 (YT_NO_FETCH=1: 시세·AI 없이 DB 값만)"]
     M --> N["서비스 서버가 AI 의견·새 판정이 들어간 DB 로 서비스"]
     N --> A
@@ -112,7 +113,7 @@ flowchart TD
 | 대상 | 명령 |
 |---|---|
 | 개발 서버 처음 한 번 | `make dev-init` (백업 저장소 clone + DB 복원) → 프로젝트 폴더에 **`.env`**(필수) 를 만들고 `PSNCS_HOST`·`PSNCS_ID`·`PSNCS_YT_WATCH_DIR`(필수; 선택 `PSNCS_PORT`·`PSNCS_PASSWD`·`PSNCS_SSH_OPTS`) 기재 → `make inbox-dry`(ssh 연결 확인) → `make cron-dev`. **`.env` 가 없거나 `PSNCS_*` 필수 값이 없으면 `inbox_apply.py` 가 오류(종료코드 2)를 내고 `run_skill.sh` 가 개발 서버 실행을 멈춘다.** 접속은 ssh 키(권장) 또는 `PSNCS_PASSWD`(`sshpass` 필요: `sudo apt install sshpass`)로 한다 |
-| 서비스 서버 처음 한 번 | `make cron-service` (10분마다 `service_sync.py`; 기존 01:00 줄은 그대로 — 분리 전에는 legacy 라 예전처럼 동작) → `make opinion-restart`(입력 서버가 inbox 를 쌓도록 코드 반영) |
+| 서비스 서버 처음 한 번 | `make cron-service` (10분마다 `service_sync.py`; 분리가 끝나면 예전 01:00 `run_skill.sh` 줄은 지운다) → `make opinion-restart`(입력 서버가 inbox 를 쌓도록 코드 반영) |
 | 상태 확인 | `make role` · `make backup-status` · `make inbox-status` |
 | 수동 실행 | 개발: `make daily` · `make inbox-apply` / 서비스: `make service-sync` · `make service-force` |
 
@@ -133,7 +134,9 @@ PSNCS_PORT=22443
 3. **개발 서버**: `make dev-init`(백업 clone + DB 복원) → `.env` 작성 → `make role`(`dev`) → `make inbox-dry`(ssh 로 쌓인 입력 개수가 보이는지).
 4. **개발 서버**: `make inbox-apply`(2번에서 누른 입력이 반영되고 psncs 의 파일이 지워지는지) → `make daily`(전체 한 번 돌려 백업 push 까지) → 로그에서 inbox 줄과 push 줄 확인.
 5. **psncs**: 10분 안에(또는 `make service-sync`) 새 백업 시각을 보고 복원했는지 — `make backup-status` 에서 두 시각이 같아지고 `logs/service.log` 에 "복원 완료".
-6. **개발 서버**: `make cron-dev` 로 매일 01:00 등록. (psncs 의 기존 01:00 줄은 service 역할이 되면 복원만 하므로 그대로 두어도 되고, 지워도 된다.)
+6. **개발 서버**: `make cron-dev` 로 매일 01:00 등록. (psncs 는 2026-11-27 에 예전 01:00 `run_skill.sh` 줄을 지우고 10분 `service_sync.py` 줄만 남겼다.)
+
+**입력 서버를 고쳤거나 `git pull` 한 뒤에는 반드시 `make opinion-restart`** — 떠 있는 서버는 옛 코드로 계속 돌아 inbox 를 쌓지 않을 수 있다.
 
 주의: 서비스 서버의 백업 폴더(`~/yt-watcher-later-backup`)는 `service_sync.py` 가 원격과 똑같이 맞추는(reset --hard) 읽기 전용 사본이다. 거기서 직접 commit·push 하지 않는다.
 

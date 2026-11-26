@@ -1,6 +1,7 @@
 """DB 백업/복구 (git 에 올릴 수 있는 텍스트 형식).
 
   uv run dbbackup.py dump [백업폴더]              # DB -> 백업폴더 (schema.sql + 표마다 <표>.jsonl)
+  uv run dbbackup.py keep-previous                 # DB 를 갱신하기 직전 상태를 data/watchlater.db.bak 하나로 복사(날짜별로 쌓지 않고 덮어씀)
   uv run dbbackup.py restore 백업폴더 새DB경로      # 백업 -> 새 SQLite 파일 (이미 있으면 거부)
   uv run dbbackup.py verify [백업폴더]             # 지금 DB 와 백업이 같은지 비교
   uv run dbbackup.py sync [백업폴더]               # dump + README.md·HISTORY.md 갱신 + git commit + push (run_skill.sh 끝에서 호출; push 까지 못 하면 종료코드 1)
@@ -167,10 +168,24 @@ def sync(out=None):
     except subprocess.TimeoutExpired: return msg + " / push 시간 초과(다음 실행에서 재시도)"
     return msg + (" / push 완료" if p.returncode == 0 else f" / push 실패(다음 실행에서 재시도): {(p.stderr or p.stdout).strip()[-200:]}")
 
+def keep_previous(db=None):
+    """DB 갱신(일일 실행·복원) 직전의 DB 를 같은 폴더의 <이름>.bak 한 개로 복사한다(덮어씀). SQLite backup API 라 쓰는 중이어도 일관된 사본이 된다."""
+    src = pathlib.Path(db or D.DB_PATH)
+    if not src.exists(): return None
+    dst, tmp = src.with_name(src.name + ".bak"), src.with_name(src.name + ".bak.tmp")
+    if tmp.exists(): tmp.unlink()
+    a, b = sqlite3.connect(src), sqlite3.connect(tmp)
+    try: a.backup(b)
+    finally: a.close(); b.close()
+    os.replace(tmp, dst)                                    # 복사가 끝난 뒤에만 이전 .bak 을 바꾼다
+    return dst
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("dump", "restore", "verify", "sync"): raise SystemExit(__doc__)
-    if a[0] == "dump":
+    if not a or a[0] not in ("dump", "restore", "verify", "sync", "keep-previous"): raise SystemExit(__doc__)
+    if a[0] == "keep-previous": print("갱신 전 DB 사본:", keep_previous() or "DB 없음")
+    elif a[0] == "dump":
         n = dump(a[1] if len(a) > 1 else None); print(f"백업 완료 → {a[1] if len(a) > 1 else DEFAULT}  ({len(n)}개 표, {sum(n.values())}행)")
     elif a[0] == "sync":
         m = sync(a[1] if len(a) > 1 else None); print("DB 백업:", m); sys.exit(0 if "push 완료" in m else 1)

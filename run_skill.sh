@@ -25,6 +25,7 @@ else YT_MODEL=$MODEL; fi
 export YT_ENGINE=$TOOL YT_MODEL YT_RUN="$(date +%Y-%m-%d_%H%M)-$TOOL"   # YT_RUN: 이번 실행의 리포트 이름(날짜_시분-LLM)
 ROUNDS=${ROUNDS:-4}; BUDGET=${BUDGET:-700000}
 echo "===== $(date '+%F %T') 시작 (스킬 모드, 역할 $ROLE, 도구 $TOOL, 모델 $YT_MODEL) ====="
+uv run dbbackup.py keep-previous || echo "갱신 전 DB 사본 만들기 실패(계속)"   # data/watchlater.db.bak 한 개(덮어씀)
 if [ "$ROLE" = dev ]; then   # 개발 서버: 서비스 서버의 inbox(의견·액션·별표)를 받아 DB 에 반영한 뒤 시작
   uv run inbox_apply.py; rc=$?
   if [ "$rc" = 2 ]; then echo "$(date '+%F %T') 개발 서버 설정 오류(.env 의 PSNCS_HOST·PSNCS_ID·PSNCS_YT_WATCH_DIR) — 실행을 멈춤"; exit 2; fi
