@@ -25,8 +25,15 @@ def L(s):
     try: return json.loads(s) if s else []
     except Exception: return []
 
+FLOAT = """<style>.fl{position:fixed;right:12px;bottom:18px;z-index:50;display:flex;flex-direction:column;gap:6px}
+.fl button{width:42px;height:42px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--fg);font-size:17px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);opacity:.85}
+.fl button:hover{opacity:1;background:var(--ac);color:#fff}</style>
+<div class=fl><button type=button title='맨 앞(위)으로' aria-label='맨 앞으로' onclick="scrollTo({top:0,behavior:'smooth'})">⏫</button>
+<button type=button title='중간으로' aria-label='중간으로' onclick="scrollTo({top:(document.documentElement.scrollHeight-innerHeight)/2,behavior:'smooth'})">⏺</button>
+<button type=button title='맨 뒤(아래)로' aria-label='맨 뒤로' onclick="scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})">⏬</button></div>"""
+
 def page(title, body, icon="▶️"):
-    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon type=image/svg+xml href='{favicon(icon)}'><style>{CSS}</style><main><div class=meta style='text-align:right'>🕒 만든 시각 {D.now().replace('T', ' ')}</div>{body}</main></html>"
+    return f"<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{e(title)}</title><link rel=icon type=image/svg+xml href='{favicon(icon)}'><style>{CSS}</style><main><div class=meta style='text-align:right'>🕒 만든 시각 {D.now().replace('T', ' ')}</div>{body}</main>{FLOAT}</html>"
 
 def dur(s): return f"{s//3600}:{s%3600//60:02d}:{s%60:02d}" if s and s >= 3600 else (f"{s//60}:{s%60:02d}" if s else "-")
 def num(n): return f"{n:,}" if isinstance(n, int) else "-"
