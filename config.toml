@@ -10,6 +10,7 @@ model = "sonnet"
 # ── 두 역할로 나눠 쓰기(README 의 '역할 분리' 참고) ──
 # 이 컴퓨터 이름이 service_hostnames 에 있으면 서비스 서버(psncs), 없으면 개발 서버. (환경변수 YT_ROLE 또는 ~/.config/yt-watcher-later/role 로 덮어쓸 수 있음)
 service_hostnames = ["ideapad-700-15ISK"]
+host_aliases = { "ideapad-700-15ISK" = "psncs" }   # 홈 제목에 컴퓨터 이름 대신 보여 줄 이름
 # 이 시각 전에는 서비스 서버도 예전처럼(legacy) 전부 한다. 이 시각이 지나야 역할이 갈린다(개발 서버도 이 시각 전에는 실행하지 않음).
 split_from = "2026-11-27 06:00"
 

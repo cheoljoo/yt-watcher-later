@@ -56,6 +56,12 @@ def ready(now=None):
     return role(now) != "dev" or split_started(now)
 
 
+def label():
+    """홈 제목에 붙이는 '개발:컴퓨터이름' / '서비스:컴퓨터이름' (분리 전 legacy 인 서비스 서버도 '서비스')."""
+    host = socket.gethostname()
+    return f"{'서비스' if raw_role()[0] == 'service' else '개발'}:{_cfg().get('host_aliases', {}).get(host, host)}"
+
+
 def why():
     r, reason = raw_role(); sf = split_from()
     out = f"역할 {role()}  ← {reason}"
