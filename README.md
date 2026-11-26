@@ -97,9 +97,13 @@ flowchart TD
     H --> I["서비스 서버 cron (10분마다): git fetch + reset --hard"]
     I --> J{"BACKUP_TIME 이<br/>지난번 복원한 것과 다른가?"}
     J -- "같음 (또는 자기가 만든 백업)" --> K["아무것도 안 함 (기존 DB 로 계속 서비스)"]
-    J -- "다름" --> L["⑦ 새 파일(watchlater.db.new)로 복원 → 행 수 검증<br/>→ 기존 DB 를 watchlater.db.bak 으로 복사 → os.replace 로 교체"]
-    L --> M["⑧ 리포트 다시 만들기 (YT_NO_FETCH=1: 시세·AI 없이 DB 값만)"]
-    M --> N["서비스 서버가 AI 의견·새 판정이 들어간 DB 로 서비스"]
+    J -- "다름" --> P["⑦ 프로젝트 소스 git pull --ff-only<br/>(바뀌었으면 새 코드로 다시 실행)"]
+    P --> L["⑧ 새 파일(watchlater.db.new)로 복원 → 행 수 검증<br/>→ 기존 DB 를 watchlater.db.bak 으로 복사 → os.replace 로 교체"]
+    L --> M["⑨ 리포트 다시 만들기 (YT_NO_FETCH=1: 시세·AI 없이 DB 값만)"]
+    M --> R{"소스의 .py 나 의존성이<br/>바뀌었나?"}
+    R -- "예" --> S["⑩ 입력 서버(yt-opinion) 재시작"]
+    R -- "아니오" --> N
+    S --> N["서비스 서버가 AI 의견·새 판정이 들어간 DB 로 서비스"]
     N --> A
 ```
 
@@ -138,7 +142,9 @@ PSNCS_PORT=22443
 5. **psncs**: 10분 안에(또는 `make service-sync`) 새 백업 시각을 보고 복원했는지 — `make backup-status` 에서 두 시각이 같아지고 `logs/service.log` 에 "복원 완료".
 6. **개발 및 AI 실행 서버**: `make cron-dev` 로 매일 01:00 등록. (psncs 는 2026-11-27 에 예전 01:00 `run_skill.sh` 줄을 지우고 10분 `service_sync.py` 줄만 남겼다.)
 
-**입력 서버를 고쳤거나 `git pull` 한 뒤에는 반드시 `make opinion-restart`** — 떠 있는 서버는 옛 코드로 계속 돌아 inbox 를 쌓지 않을 수 있다.
+서비스 서버는 새 백업이 있을 때 소스도 함께 `git pull` 하고, `.py`·`pyproject.toml`·`uv.lock` 이 바뀌었으면 입력 서버를 스스로 재시작한다(문서·Makefile 만 바뀌면 재시작하지 않음). 생성·재시작이 실패하면 다음 10분 회차에 다시 한다. 백업이 그대로면 소스도 받지 않는다.
+
+**손으로 `git pull` 했거나 입력 서버 코드를 직접 고친 뒤에는 `make opinion-restart`** — 떠 있는 서버는 옛 코드로 계속 돌아 inbox 를 쌓지 않을 수 있다.
 
 주의: 서비스 서버의 백업 폴더(`~/yt-watcher-later-backup`)는 `service_sync.py` 가 원격과 똑같이 맞추는(reset --hard) 읽기 전용 사본이다. 거기서 직접 commit·push 하지 않는다.
 
