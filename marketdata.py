@@ -36,17 +36,19 @@ def fred(series, back=None):
     except Exception: return None
 
 ENV_FILE = __import__("pathlib").Path.home() / ".config" / "yt-watcher-later" / "env"
+ENV_FILES = (ENV_FILE, __import__("pathlib").Path(__file__).resolve().parent / ".env")       # 프로젝트 안 .env(git 에 올리지 않음)도 읽는다
 
 def secret(name):
-    """~/.config/yt-watcher-later/env (KEY=값 줄, 권한 600)에서 키를 읽는다. 환경변수가 있으면 그것을 우선. 없으면 None."""
+    """~/.config/yt-watcher-later/env 또는 프로젝트의 .env (KEY=값 줄, 권한 600)에서 키를 읽는다. 환경변수가 있으면 그것을 우선. 없으면 None."""
     import os
     if os.environ.get(name): return os.environ[name]
-    try:
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            k, _, v = line.partition("=")
-            if k.strip() == name and not line.lstrip().startswith("#"):
-                v = v.strip(); return v[1:-1] if len(v) > 1 and v[0] in "\"'" and v[-1] == v[0] else v
-    except Exception: pass
+    for f in ENV_FILES:
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() == name and not line.lstrip().startswith("#"):
+                    v = v.strip(); return v[1:-1] if len(v) > 1 and v[0] in "\"'" and v[-1] == v[0] else v
+        except Exception: pass
     return None
 
 def ecos(symbol, back=None):

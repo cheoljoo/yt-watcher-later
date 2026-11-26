@@ -3,7 +3,7 @@
   uv run dbbackup.py dump [백업폴더]              # DB -> 백업폴더 (schema.sql + 표마다 <표>.jsonl)
   uv run dbbackup.py restore 백업폴더 새DB경로      # 백업 -> 새 SQLite 파일 (이미 있으면 거부)
   uv run dbbackup.py verify [백업폴더]             # 지금 DB 와 백업이 같은지 비교
-  uv run dbbackup.py sync [백업폴더]               # dump + README.md·HISTORY.md 갱신 + git commit + push (run_skill.sh 끝에서 호출)
+  uv run dbbackup.py sync [백업폴더]               # dump + README.md·HISTORY.md 갱신 + git commit + push (run_skill.sh 끝에서 호출; push 까지 못 하면 종료코드 1)
 
 형식: 표 하나 = 파일 하나, 행 하나 = 한 줄(JSON), 기본키 순 정렬. 그래서 git 은 바뀐 줄만 diff·압축한다.
 표 하나의 덤프가 40MB 를 넘으면(GitHub 은 파일 하나 100MB 초과 push 를 거부) <표>.s00.jsonl, .s01 … 로 나눈다 — 조각 수는 SHARDS.json 에 기록하고 줄이지 않으며,
@@ -121,6 +121,7 @@ README = """# yt-watcher-later DB 백업
 - `schema.sql` — 표·인덱스 정의
 - `<표>.jsonl` — 표마다 한 파일, 행 하나가 한 줄(JSON), 기본키 순 정렬. 같은 DB 면 항상 같은 내용이라 git 에는 **바뀐 줄만** 기록됩니다.
 - `<표>.sNN.jsonl`, `SHARDS.json` — 표 하나가 40MB 를 넘으면 자동으로 여러 조각으로 나눕니다(GitHub 파일 100MB 한도 대비). 복구·검증은 조각을 자동으로 합칩니다.
+- `BACKUP_TIME` — 백업이 끝난 시각(1행)과 만든 컴퓨터(2행). 매 백업마다 같은 commit 으로 push 된다. 서비스 서버는 이 시각이 지난번과 다르면 DB 를 복원하고, 마지막 백업이 언제 만들어졌는지·문제가 어디서 생겼는지 알아보는 데도 쓴다
 - `HISTORY.md` — 백업할 때마다 한 줄 추가(언제, 몇 행, 무엇이 바뀌었는지)
 
 ## 언제 갱신되나
@@ -151,6 +152,8 @@ def sync(out=None):
     hist = out / "HISTORY.md"
     if not hist.exists(): hist.write_text("# 백업 기록\n\n| 시각 | 총 행 수 | 바뀐 표 |\n|---|---:|---|\n", encoding="utf-8")
     with open(hist, "a", encoding="utf-8") as f: f.write(f"| {now} | {sum(n.values())} | {ch} |\n")
+    import socket
+    (out / "BACKUP_TIME").write_text(f"{now}\n{socket.gethostname()}\n", encoding="utf-8")   # 백업이 끝난 시각 — 같은 commit·push 로 올라가고, 서비스 서버는 이 값이 지난번과 다르면 DB 를 복원한다
     recent = "\n".join(hist.read_text(encoding="utf-8").splitlines()[-10:][::-1])
     (out / "README.md").write_text(README.format(now=now, size=pathlib.Path(D.DB_PATH).stat().st_size / 1e6, rev=rev, total=sum(n.values()), ntab=len(n), changed=ch,
         rows="\n".join(f"| `{t}` | {c} |" for t, c in sorted(n.items())), recent="| 시각 | 총 행 수 | 바뀐 표 |\n|---|---:|---|\n" + "\n".join(l for l in recent.splitlines() if l.startswith("| 20"))), encoding="utf-8")
@@ -169,7 +172,8 @@ if __name__ == "__main__":
     if not a or a[0] not in ("dump", "restore", "verify", "sync"): raise SystemExit(__doc__)
     if a[0] == "dump":
         n = dump(a[1] if len(a) > 1 else None); print(f"백업 완료 → {a[1] if len(a) > 1 else DEFAULT}  ({len(n)}개 표, {sum(n.values())}행)")
-    elif a[0] == "sync": print("DB 백업:", sync(a[1] if len(a) > 1 else None))
+    elif a[0] == "sync":
+        m = sync(a[1] if len(a) > 1 else None); print("DB 백업:", m); sys.exit(0 if "push 완료" in m else 1)
     elif a[0] == "restore":
         if len(a) < 3: raise SystemExit("사용: restore 백업폴더 새DB경로")
         n = restore(a[1], a[2]); print(f"복구 완료 → {a[2]}  ({len(n)}개 표, {sum(n.values())}행)")

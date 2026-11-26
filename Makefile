@@ -6,7 +6,7 @@
 # 이 프로젝트가 하는 일 (한 줄 요약)
 #   내 YouTube '나중에 볼 동영상' 재생목록을 수집 → 자막·AI 분석 → SQLite(data/watchlater.db) 저장
 #   → HTML 리포트(reports/) 생성 → nginx 로 공개(psncs.iptime.org/yt_watch_later/).
-#   매일 01:00 cron 이 `run_skill.sh --agy` 를 실행한다 (crontab -l 로 확인).
+#   매일 01:00 cron 이 `run_skill.sh --agy` 를 실행한다 (crontab -l 로 확인). 역할(개발/서비스)은 아래 '두 역할' 절 참고.
 #
 # 규칙: Python 은 반드시 `uv` 로만 실행한다 (pip/venv 직접 사용 금지).
 #       아래 모든 python 명령은 `uv run` 이다.
@@ -16,11 +16,14 @@
 UV      ?= uv run
 # DB 백업을 둘 별도 저장소(비공개). dbbackup.py 와 같은 기본값 — YT_BACKUP_DIR 로 바꿀 수 있다.
 BACKUP  ?= $(or $(YT_BACKUP_DIR),$(HOME)/yt-watcher-later-backup)
+BACKUP_REMOTE ?= https://github.com/cheoljoo/yt-watcher-later-backup.git
+PROJ    := $(CURDIR)
 
 .DEFAULT_GOAL := help
 .PHONY: help report daily daily-claude collect status finish check-due export retry-subs retry-subs-collect \
         opinion-status opinion-restart opinion-log cron-show \
-        backup backup-verify backup-restore backup-push
+        backup backup-verify backup-restore backup-push \
+        role dev-init service-sync service-force inbox-status inbox-apply inbox-dry backup-status cron-dev cron-service
 
 help: ## 이 도움말 보기
 	@echo "yt-watcher-later — 사용 가능한 make 대상"; echo
@@ -94,3 +97,42 @@ backup-restore: ## 백업 → 새 DB 파일로 복구:  make backup-restore DEST
 
 backup-push: ## 덤프 + README·HISTORY 갱신 + 백업 저장소 commit + push (매일 새벽 run_skill.sh 끝에서도 자동 실행)
 	$(UV) dbbackup.py sync $(BACKUP)
+
+# ── 두 역할(개발 서버 / 서비스 서버) ───────────────────────────────────────────
+# 개발 서버(dev): 수집·AI·DB 원본·리포트·백업 push. 시작할 때 서비스 서버의 inbox 를 받아 DB 에 반영한다.
+# 서비스 서버(service, psncs): 백업 저장소를 pull 해 BACKUP_TIME(백업이 끝난 시각)이 달라졌으면 DB 를 다시 만들고 web 서비스. 사용자 입력은 inbox 에 모은다.
+# 역할은 이 컴퓨터 이름(config.toml service_hostnames)으로 자동 판단한다. config.toml 의 split_from 시각 전에는 서비스 서버도 예전처럼(legacy) 전부 한다.
+role: ## 이 컴퓨터의 역할(legacy/service/dev)과 판단 이유
+	$(UV) role.py --why
+
+dev-init: ## (개발 서버, 처음 한 번) 백업 저장소를 받아 DB 를 복원한다. 이후 프로젝트 폴더 .env 에 PSNCS_HOST·PSNCS_ID·PSNCS_YT_WATCH_DIR 을 적는다
+	@test -d $(BACKUP)/.git || git clone $(BACKUP_REMOTE) $(BACKUP)
+	@test -f data/watchlater.db && echo "data/watchlater.db 가 이미 있어 복원하지 않음" || { mkdir -p data && $(UV) dbbackup.py restore $(BACKUP) data/watchlater.db; }
+	@echo "다음: 프로젝트 폴더 .env 에  PSNCS_HOST=psncs.iptime.org  PSNCS_ID=<사용자>  PSNCS_YT_WATCH_DIR=~/code/yt-watcher-later  (비밀번호 접속이면 PSNCS_PASSWD, 포트는 PSNCS_PORT)  를 적고(없으면 daily 가 오류로 멈춤)  make inbox-dry  로 ssh 연결 확인, make cron-dev  로 cron 등록"
+
+service-sync: ## (서비스 서버) 백업 pull → 백업 시각(BACKUP_TIME)이 달라졌으면 DB 복원·교체 + 리포트 다시 만들기 (cron 이 10분마다 자동으로도 함)
+	$(UV) service_sync.py
+
+service-force: ## (서비스 서버) 백업 시각이 같아도 다시 복원
+	$(UV) service_sync.py --force
+
+inbox-status: ## (서비스 서버) 개발 서버가 아직 안 가져간 입력(inbox) 개수
+	$(UV) inbox.py
+
+inbox-dry: ## (개발 서버) ssh 로 서비스 서버에 쌓인 입력 개수만 확인(.env 의 PSNCS_* 와 ssh 연결 확인용, 아무것도 가져오거나 지우지 않음)
+	$(UV) inbox_apply.py --dry
+
+inbox-apply: ## (개발 서버) ssh/scp 로 서비스 서버 inbox 를 가져와 DB 에 반영하고 서비스 서버의 파일 삭제 (daily 가 시작할 때 자동으로도 함)
+	$(UV) inbox_apply.py
+
+backup-status: ## 백업 저장소의 마지막 백업 시각(BACKUP_TIME)과 서비스 서버가 마지막으로 복원한 백업 시각
+	@echo "백업 저장소의 마지막 백업 시각:        $$(head -1 $(BACKUP)/BACKUP_TIME 2>/dev/null || echo '없음')   (만든 컴퓨터: $$(sed -n 2p $(BACKUP)/BACKUP_TIME 2>/dev/null))"
+	@echo "서비스 서버가 마지막으로 복원한 시각:  $$(head -1 data/_service/last_backup_time 2>/dev/null || echo '-')"
+
+cron-dev: ## (개발 서버) 매일 01:00 run_skill.sh --agy 를 crontab 에 등록(이미 있으면 교체)
+	@( crontab -l 2>/dev/null | grep -v '# yt-role:dev' ; echo "0 1 * * * $(PROJ)/run_skill.sh --agy >> $(PROJ)/logs/daily.log 2>&1  # yt-role:dev" ) | crontab -
+	@crontab -l | grep 'yt-role:dev'
+
+cron-service: ## (서비스 서버) 10분마다 service_sync.py 를 crontab 에 등록(기존 01:00 줄은 그대로 둠 — 분리 전에는 legacy 로 예전처럼 동작)
+	@( crontab -l 2>/dev/null | grep -v '# yt-role:service' ; echo "*/10 * * * * cd $(PROJ) && PATH=$(HOME)/.local/bin:/usr/bin:/bin flock -n /tmp/yt-service-sync.lock uv run python service_sync.py >> $(PROJ)/logs/service.log 2>&1  # yt-role:service" ) | crontab -
+	@crontab -l | grep 'yt-role:service'
