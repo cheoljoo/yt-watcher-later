@@ -53,13 +53,13 @@ def secret(name):
 
 def ecos(symbol, back=None):
     """한국은행 ECOS(인증키 필요: ~/.config/yt-watcher-later/env 의 ECOS_API_KEY). symbol = "통계표/주기/항목1[/항목2..][|옵션...]"
-    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, ma3 = 3기간 이동평균, scale=배율, minus=항목코드(같은 통계표·주기의 다른 항목을 날짜별로 뺌: 금리 스프레드),
+    주기 M(월)·Q(분기)·D(일)·A(연). 옵션: diff = 전기 대비 증감, yoy = 월간 전년동월비(%), ma3 = 3기간 이동평균, scale=배율, minus=항목코드(같은 통계표·주기의 다른 항목을 날짜별로 뺌: 금리 스프레드),
     예) 901Y062/M/P63AC , 151Y005/M/11100A0|diff|scale=0.001 , 817Y002/D/010300000|minus=010200000 (회사채 AA- 3년 − 국고채 3년)"""
     key = secret("ECOS_API_KEY")
     if not key: return None
     try:
         main, *opts = symbol.split("|"); stat, cyc, *items = main.split("/")
-        today = datetime.date.today(); back_d = today - datetime.timedelta(days=max(back or 0, 1100 if cyc in ("M", "Q", "A") else 200))
+        today = datetime.date.today(); back_d = today - datetime.timedelta(days=max(back or 0, 1100 if cyc in ("M", "Q", "A") else 200) + (400 if "yoy" in opts else 0))
         fmt = {"M": lambda d: d.strftime("%Y%m"), "D": lambda d: d.strftime("%Y%m%d"), "A": lambda d: d.strftime("%Y"),
                "Q": lambda d: f"{d.year}Q{(d.month - 1) // 3 + 1}"}[cyc]
         def fetch_rows(its):
@@ -79,6 +79,7 @@ def ecos(symbol, back=None):
         for o in opts:
             if o == "diff": rows = [(rows[i][0], rows[i][1] - rows[i - 1][1]) for i in range(1, len(rows))]
             elif o.startswith("scale="): rows = [(d, v * float(o[6:])) for d, v in rows]
+            elif o == "yoy": rows = [(rows[i][0], (rows[i][1] / rows[i - 12][1] - 1) * 100) for i in range(12, len(rows)) if rows[i - 12][1]]     # 월간 전년동월비(%)
             elif o == "ma3": rows = [(rows[i][0], sum(v for _, v in rows[i - 2:i + 1]) / 3) for i in range(2, len(rows))]
         return rows or None
     except Exception: return None
@@ -267,13 +268,24 @@ def _krx_point(s, symbol, day):
         return (f"{day[:4]}-{day[4:6]}-{day[6:]}", round(a / b * 100, 3)) if b else None
     return None
 
+def _krx_vkospi(s, days):
+    """코스피200 변동성지수(VKOSPI) 일별 종가. 파생·기타지수 개별지수 시세(MDCSTAT01201, 지수 묶음 1 / 300)를 기간으로 한 번에 받는다."""
+    end = datetime.date.today()
+    r = s.post("https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd", timeout=40, data={
+        "bld": "dbms/MDC/STAT/standard/MDCSTAT01201", "locale": "ko_KR", "csvxls_isNo": "false", "indTpCd": "1", "idxIndCd": "300",
+        "strtDd": (end - datetime.timedelta(days=days)).strftime("%Y%m%d"), "endDd": end.strftime("%Y%m%d")})
+    rows = [(x["TRD_DD"].replace("/", "-"), _n(x["CLSPRC_IDX"])) for x in r.json().get("output") or []]
+    return sorted((d, v) for d, v in rows if v) or None
+
 def krx(symbol):
     """KRX 정보데이터시스템(로그인) 에서 시장 단위 값을 계산한다. 최근 영업일 2개 점을 돌려준다.
     symbol = "pbr"     코스피 전체 PBR = Σ시가총액 ÷ Σ순자산(종목 PBR>0 인 것만, 순자산 = 시가총액÷PBR)
-             "forn200" 코스피200 외국인 지분율(%) = Σ(외국인 보유주식×종가) ÷ Σ(상장주식×종가)"""
+             "forn200" 코스피200 외국인 지분율(%) = Σ(외국인 보유주식×종가) ÷ Σ(상장주식×종가)
+             "vkospi"  코스피200 변동성지수(최근 약 6개월 일별)"""
     try:
         s = _krx_session()
         if s is None: return None
+        if symbol == "vkospi": return _krx_vkospi(s, 190)
         out, d = [], datetime.date.today()
         for _ in range(12):
             if len(out) == 2: break
@@ -287,6 +299,7 @@ def krx_history(symbol, months):
     try:
         s = _krx_session()
         if s is None: return None
+        if symbol == "vkospi": return _krx_vkospi(s, min(months * 31, 700))
         out, today = [], datetime.date.today()
         for k in range(months):
             y, m = divmod(today.year * 12 + today.month - 1 - k, 12); m += 1
@@ -297,13 +310,32 @@ def krx_history(symbol, months):
         return sorted(out) or None
     except Exception: return None
 
-SOURCES = ("yahoo", "fred", "kofia", "multpl", "ecos", "rone", "krx", "sec")           # 자동으로 값을 받을 수 있는 출처
+# ── 스테이블코인 공급량 (DefiLlama, 키 불필요) ─────────────────────────────
+LLAMA_ID = {"USDT": 1, "USDC": 2}
+
+def llama(symbol, back=None):
+    """symbol = "USDT+USDC" 처럼 + 로 묶은 스테이블코인의 일별 유통량 합계(단위: 10억 개 ≒ 10억 달러). 하나라도 못 받으면 None."""
+    since = datetime.date.today() - datetime.timedelta(days=max(back or 0, 200))
+    total = None
+    try:
+        for coin in symbol.split("+"):
+            rows = json.loads(_get(f"https://stablecoins.llama.fi/stablecoincharts/all?stablecoin={LLAMA_ID[coin]}"))
+            one = {}
+            for r in rows:
+                day = datetime.datetime.fromtimestamp(int(r["date"]), datetime.timezone.utc).date()
+                if day >= since: one[day.isoformat()] = r["totalCirculating"]["peggedUSD"] / 1e9
+            total = one if total is None else {d: total[d] + one[d] for d in total.keys() & one.keys()}
+        return sorted(total.items()) or None
+    except Exception: return None
+
+SOURCES = ("yahoo", "fred", "kofia", "multpl", "ecos", "rone", "krx", "sec", "llama")           # 자동으로 값을 받을 수 있는 출처
 
 def fetch(source, symbol, back=None):
     """back: 며칠 전까지의 이력을 받을지(1회성 이력 채우기). 없으면 평소처럼 최근 값만."""
     if source == "yahoo": return yahoo(symbol, back)
     if source == "fred": return fred(symbol, back)
     if source == "kofia": return kofia(symbol, back)
+    if source == "llama": return llama(symbol, back)
     if source == "ecos": return ecos(symbol, back)
     if source == "rone": return rone(symbol, back)
     if source == "sec": return sec(symbol, back)

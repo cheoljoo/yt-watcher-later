@@ -222,7 +222,7 @@ def build_case(con, case):
                  f"<h4 style='margin:14px 0 2px'>지금 읽기 <span class=meta>(숫자를 규칙에 대입한 기계적 요약)</span></h4><ul class=jd>{''.join(f'<li>{e(x)}' for x in lines) or '<li>판정할 값이 없습니다'}</ul></section>")
     flow = "<div class=flow>" + "<span class=a>→</span>".join(f"<span class=n>{lk['icon']} {e(lk['title'].split(' — ')[0])} {ic}</span>" for lk, ic, _ in summ) + "</div>"
     now = "".join(f"<li>{lk['icon']} <b>{e(lk['title'].split(' — ')[0])}</b> {ic} — {e(lines[0]) if lines else ''}" for lk, ic, lines in summ)
-    body = (f"<h1>🔗 {e(case['title'])}</h1><p class=meta><a href='linkage.html'>‹ 지표 연결 목록</a> · <a href='indicators.html'>📊 지표 대시보드</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='index.html'>🏠 홈</a></p>"
+    body = (f"<h1>🔗 {e(case['title'])}</h1><p class=meta><a href='linkage.html'>‹ 지표 연결(복합지수) 목록</a> · <a href='indicators.html'>📊 지표 대시보드</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='index.html'>🏠 홈</a></p>"
             f"<section class=card><h3>이 사례가 묻는 것</h3><p>{e(case['question'])}</p><h3>한 줄 요약</h3><p>{e(case['summary'])}</p>{flow}"
             f"<p><b>지금 층별 상태</b> <span class=meta>🟢 보통 · 🟡 주의 · 🔴 경계 (규칙 기반)</span></p><ul class=jd>{now}</ul></section>"
             + secs + "<section class=card><h3>읽을 때 조심할 점</h3><ul>" + "".join(f"<li>{e(c)}" for c in case["cautions"]) + "</ul></section>")
@@ -239,7 +239,7 @@ def build(con):
         chips = " ".join(f"<span class=chip>{lk['icon']} {e(lk['title'].split(' — ')[0])} {ic}</span>" for lk, ic, _ in summ)
         cards += (f"<section class=card><h3>사례 {n}. <a href='linkage_{case['id']}.html'>{e(case['title'])}</a></h3><p>{e(case['question'])}</p>"
                   f"<p class=meta>{e(case['summary'])}</p><div class=flow>{chips}</div><p><a href='linkage_{case['id']}.html'>사례 보기 ›</a></p></section>")
-    body = (f"<h1>🔗 지표 연결</h1><p class=meta>서로 이어진 지표들을 한 묶음으로 보고, 어떻게 연결해 분석할지 정리한 사례 모음입니다 · 사례 {len(L.CASES)}개 · "
+    body = (f"<h1>🔗 지표 연결(복합지수)</h1><p class=meta>서로 이어진 지표들을 한 묶음으로 보고, 어떻게 연결해 분석할지 정리한 사례 모음입니다 · 사례 {len(L.CASES)}개 · "
             "<a href='indicators.html'>📊 지표 대시보드</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='index.html'>🏠 홈</a></p>"
             "<p class=meta>사례는 계속 추가됩니다. 새 사례는 <code>linkage_data.py</code> 의 <code>CASES</code> 에 (묻는 것·층별 지표·그래프·분석 순서)를 넣으면 이 목록과 홈 사이트 맵에 자동으로 나타납니다.</p>" + cards)
-    (R.OUT / "linkage.html").write_text(R.page("지표 연결", CSS + "<style>.chip{background:var(--chip);border:1px solid var(--bd);border-radius:10px;padding:3px 9px;font-size:13px}</style>" + body, "🔗"), encoding="utf-8")
+    (R.OUT / "linkage.html").write_text(R.page("지표 연결(복합지수)", CSS + "<style>.chip{background:var(--chip);border:1px solid var(--bd);border-radius:10px;padding:3px 9px;font-size:13px}</style>" + body, "🔗"), encoding="utf-8")

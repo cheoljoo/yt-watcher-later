@@ -170,11 +170,12 @@ def how_block():
     cases = [(f"linkage_{c['id']}.html", f"└ {c['title']}", c["question"], True) for c in LD.CASES]
     tree = [("📊 지표", [("indicators.html", "📊 지표 대시보드", "설명·시세·의미·매크로 (AI 표기)"),
                          ("indicator_trends.html", "📉 지표 추이", "날짜별 그래프·중요한 날(주별 큰 일)·상황 설명"),
-                         ("linkage.html", "🔗 지표 연결", "이어진 지표를 묶어 분석하는 사례 모음(계속 추가)")] + cases +
+                         ("linkage.html", "🔗 지표 연결(복합지수)", "이어진 지표를 묶어 분석하는 사례 모음(계속 추가)")] + cases +
                         [("leading.html", "🧭 선행지수 정리", "선행지표의 방향·투자 의견·선행 관계 그래프(시차 슬라이더)")]),
             ("🎬 투자 방식", [("seodaeri.html", "📺 서대리TV", "규칙·매매 이력 차트·따라 하는 법·지금 상태(매일 갱신)"),
                             ("kimyoungik.html", "🎓 김영익 교수", "교재+영상: 국면별 비중·점검 지표·지금 상태(매일 갱신)"),
                             ("seojunsik.html", "🏛️ 서준식 교수", "채권형 주식 계산기·자산배분 원칙·금리 기준·지금 상태")]),
+            ("💡 New Business", [("newbiz.html", "💡 New Business", "사업 아이템 조사 모음(목록·요약)"), ("newbiz_solar.html", "└ 태양광 발전 사업", "비용·수익·정부 지원·위험·ROI 계산기", True)]),
             ("💰 부자들", [("rich.html", "💰 부자들", "부자들이 쓰는 투자 방법 매일 3개(요약+원문 링크)")]),
             ("✅ 나의 확인 사항", [("checks_pending.html", "⏳ 앞으로 확인할 것", "확인 예정 항목(예상이 맞을 때/틀릴 때 포함)"),
                                ("checks_done.html", "✅ 확인한 것", "판정 결과(주제·신호·기간 선택)"),
@@ -210,7 +211,7 @@ def build_all(con):
     yday = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.checked_at=? ORDER BY c.check_date, c.id", (last,)).fetchall()
     late = con.execute("SELECT c.*, v.title FROM checks c LEFT JOIN videos v ON v.id=c.video_id WHERE c.status='pending' AND c.check_date<? ORDER BY c.check_date", (D.today(),)).fetchall()
     import role
-    body = f"<h1>▶️ {e(role.label())} YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='tags.html'>🏷️ 태그별 보기</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='linkage.html'>🔗 지표 연결</a> · <a href='rich.html'>💰 부자들</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
+    body = f"<h1>▶️ {e(role.label())} YouTube 나중에 볼 동영상 리포트</h1><p class=meta><a href='checks_pending.html'>⏳ 앞으로 확인할 것</a> · <a href='checks_done.html'>✅ 확인한 것</a> · <a href='indicators.html'>📊 지표</a> · <a href='indicator_trends.html'>📉 지표 추이</a> · <a href='stats.html'>📈 시청 성향</a> · <a href='highlights.html'>⭐ 인상 깊은 영상</a> · <a href='browse.html'>🗂️ 날짜·주제별 보기</a> · <a href='tags.html'>🏷️ 태그별 보기</a> · <a href='newbiz.html'>💡 New Business</a> · <a href='seodaeri.html'>📺 서대리TV 투자 방식</a> · <a href='kimyoungik.html'>🎓 김영익 교수 투자 방식</a> · <a href='seojunsik.html'>🏛️ 서준식 교수 투자 방식</a> · <a href='leading.html'>🧭 선행지수 정리</a> · <a href='linkage.html'>🔗 지표 연결(복합지수)</a> · <a href='rich.html'>💰 부자들</a> · <a href='opinions.html'>💬 나와 AI 의견</a> · <a href='actions.html'>🎯 액션</a> · <a href='watchlater.json'>전체 데이터(JSON)</a> · <a href='/'>홈</a></p>"
     import search
     body = body.replace("</h1>", "</h1>" + search.widget(), 1)      # 제목 바로 아래 검색창
     body += how_block()
@@ -230,6 +231,7 @@ def build_all(con):
     import highlight; highlight.build(con)
     import browse; browse.build(con)
     import tagview; tagview.build(con)
+    import newbiz; newbiz.build()
     import seodaeri; seodaeri.build(con)
     import kimyoungik; kimyoungik.build(con)
     import seojunsik; seojunsik.build(con)

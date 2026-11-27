@@ -14,6 +14,7 @@ YouTube 재생목록(예: `my-watch-later`)에 저장해 둔 영상을 매일 �
    - 경제 영상: 매크로 국면과 근거, 봐야 할 지표, 나중에 확인할 항목(확인 예정일 포함)
    - 모든 영상: 배울 점·나중에 확인할 것(event 포함)에서 숫자로 추적할 지표를 뽑아 지표에 없으면 자동 등록(설명·출처 매핑까지). 예전 영상은 실행마다 `track_backfill_per_run` 개씩 채움
    - 태그별 보기(`tags.html`): 카테고리 → 주제 → 추가 태그 계층, 태그 여러 개로 좁히기, 최신순(정렬 선택)·페이지당 개수 선택
+   - New Business(`newbiz.html`): 사업 아이템 조사 글 목록·요약. 글 추가는 `newbiz_<slug>.py` 를 만들고 `newbiz.py` 의 `ARTICLES` 에 등록
    - 꼭 챙겨 볼 지표는 `config.toml` 의 `pinned_indicators` 에 묶음으로 적으면 지표 대시보드 맨 위에 나옴
 4. 결과를 SQLite(`data/watchlater.db`)에 저장하고, 처리일별 HTML 리포트와 JSON을 만든다.
 5. 생방송 출신이라 스크립트가 없던 영상은 7일 뒤 한 번만 다시 시도하고, 그래도 없으면 포기한다.
