@@ -20,7 +20,7 @@ BACKUP_REMOTE ?= https://github.com/cheoljoo/yt-watcher-later-backup.git
 PROJ    := $(CURDIR)
 
 .DEFAULT_GOAL := help
-.PHONY: help report daily daily-claude collect status finish check-due export retry-subs retry-subs-collect \
+.PHONY: mail-dry mail-report help report daily daily-claude collect status finish check-due export retry-subs retry-subs-collect \
         opinion-status opinion-restart opinion-log cron-show \
         backup backup-verify backup-restore backup-push \
         role dev-init service-sync service-force inbox-status inbox-apply inbox-dry backup-status cron-dev cron-service
@@ -62,6 +62,12 @@ check-due: ## 확인할 시점이 된 '확인 항목' 목록 보기
 export: ## DB 를 JSON 으로 내보내기 (reports/watchlater.json, data/watchlater_full.json)
 	$(UV) export_json.py
 	$(UV) export_json.py --full
+
+mail-dry: ## 결과 메일을 보내지 않고 data/mail-preview.html 로만 만들어 보기
+	$(UV) mailreport.py --dry data/mail-preview.html
+
+mail-report: ## 마지막 갱신분을 지금 메일로 보내기 (설정: 프로젝트 폴더 .env)
+	$(UV) mailreport.py
 
 # ── 의견·액션 저장 서버 (리포트의 💬 저장 / 🎯 버튼이 호출) ───────────────────────
 # systemd 사용자 서비스 yt-opinion (127.0.0.1:8650). nginx 가 /yt_watch_later/api/ 를 여기로 넘긴다.

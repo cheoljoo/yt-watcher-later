@@ -242,3 +242,26 @@ Apache License 2.0 — [LICENSE](LICENSE) 참고.
 - 다음 날부터 자막만 다시 받아 보고(최대 5회), 받으면 그 영상을 다시 분석해 `ok` 로 바꾼다. 5회 실패하면 `gave_up`.
 - 자막 429 도 병렬 수 조절 신호로 쓴다. agy 로 영상 내용을 기술시켜 자막 대신 쓰는 방식은 시험 결과 영상 본문을 읽지 못해 채택하지 않았다.
 - **폴백**: yt-dlp 가 자막을 못 받으면(429 포함, 진행 중 라이브 제외) `youtube-transcript-api` 로 한 번 더 시도한다. 받으면 `transcript_lang` 이 `ko (transcript-api)` 처럼 출처가 구분되어 저장되고, 그래도 실패하면 위의 meta_only(설명·댓글 기반) 경로로 이어진다.
+
+## 실행 결과 메일 (mailreport.py)
+
+실행이 끝나면 바뀐 내용(새 영상·분석·받은 입력·의견·확인 판정·표별 변화·새 커밋)을 HTML 메일(라이트/다크)로 보내고 로그를 첨부한다.
+바뀐 내용은 갱신 전 사본 `data/watchlater.db.bak` 과 지금 DB 를 비교해 만든다. 첨부와 본문의 키·비밀번호·토큰 값은 `***` 로 가린다.
+
+| 역할 | 보내는 때 | 보내는 방법 |
+|---|---|---|
+| 개발 및 AI 실행 서버 | `run_skill.sh` 가 끝날 때마다(실패 포함) | 사내 SMTP 릴레이 |
+| 서비스 서버 | 새 백업을 반영했을 때, 새로운 실패가 생겼을 때(같은 실패는 한 번만) | Gmail (앱 비밀번호) |
+
+설정은 프로젝트 폴더의 `.env` (권한 600, 심볼릭 링크도 됨, git 에 올리지 않음). 설정이 없으면 보내지 않고 넘어간다.
+
+```
+# 개발 서버                      # 서비스 서버
+SMTP_HOST=<릴레이 주소>          GMAIL_SENDER=<주소>@gmail.com
+SMTP_PORT=25                     GMAIL_APP_PASSWORD=<앱 비밀번호>
+MAIL_FROM=<보내는 주소>          MAIL_TO=<받는 주소, 없으면 GMAIL_SENDER>
+MAIL_TO=<받는 주소, 쉼표 구분>
+REPORT_URL=<메일의 '리포트 열기' 주소, 선택>
+```
+
+`make mail-dry`(보내지 않고 `data/mail-preview.html` 생성) · `make mail-report`(지금 보내기) · `YT_NO_MAIL=1 ./run_skill.sh`(이번 실행만 안 보냄)

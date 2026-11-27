@@ -123,5 +123,24 @@ def run(force=False):
     return f"복원 완료({info}행, 백업 시각 {when}) · " + finish_pending()    # 3·4. HTML, 필요하면 재시작
 
 
+def notify(message, failed):
+    """새 백업을 반영했거나 새로운 실패가 생겼을 때만 결과 메일(mailreport.py). 10분마다 같은 실패를 반복해 보내지 않는다."""
+    import mailreport
+    mark = STATE / "mail_error"
+    if failed:
+        if mark.exists() and mark.read_text(encoding="utf-8") == message: return
+    else:
+        mark.unlink(missing_ok=True)
+        if not message.startswith(("복원 완료", "지난번에 못 끝낸 일")): return
+    sent = mailreport.safe_report(log=str(ROOT / "logs" / "service.log"), tail=200, note=message, exit_code=1 if failed else 0)
+    if failed and sent: STATE.mkdir(parents=True, exist_ok=True); mark.write_text(message, encoding="utf-8")
+
+
 if __name__ == "__main__":
-    print("서비스 동기화:", run("--force" in sys.argv), flush=True)
+    try: message = run("--force" in sys.argv)
+    except Exception as e:
+        print("서비스 동기화 실패:", repr(e), flush=True)
+        if role.role() == "service": notify(f"서비스 동기화 실패: {e!r}", True)
+        raise
+    print("서비스 동기화:", message, flush=True)
+    if role.role() == "service": notify(message, any(w in message for w in ("실패", "불일치")))

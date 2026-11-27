@@ -25,6 +25,11 @@ if [ "$TOOL" = agy ]; then   # DB에 기록할 모델 이름: AGY_MODEL, 없으�
 else YT_MODEL=$MODEL; fi
 export YT_ENGINE=$TOOL YT_MODEL YT_RUN="$(date +%Y-%m-%d_%H%M)-$TOOL"   # YT_RUN: 이번 실행의 리포트 이름(날짜_시분-LLM)
 ROUNDS=${ROUNDS:-4}; BUDGET=${BUDGET:-700000}
+# 이번 실행의 로그를 따로 남기고, 끝나면(실패해도) 결과 메일을 보낸다 (mailreport.py; 설정이 없으면 넘어감, YT_NO_MAIL=1 이면 안 보냄)
+mkdir -p logs; RUNLOG="logs/run-$YT_RUN.log"; STARTED="$(date '+%F %T')"
+exec > >(tee -a "$RUNLOG") 2>&1
+send_report() { rc=$?; [ "${YT_NO_MAIL:-0}" = 1 ] && return; sleep 1; uv run mailreport.py --since "$STARTED" --log "$RUNLOG" --exit "$rc"; }
+trap send_report EXIT
 echo "===== $(date '+%F %T') 시작 (스킬 모드, 역할 $ROLE, 도구 $TOOL, 모델 $YT_MODEL) ====="
 uv run dbbackup.py keep-previous || echo "갱신 전 DB 사본 만들기 실패(계속)"   # data/watchlater.db.bak 한 개(덮어씀)
 if [ "$ROLE" = dev ]; then   # 개발 서버: 서비스 서버의 inbox(의견·액션·별표)를 받아 DB 에 반영한 뒤 시작
