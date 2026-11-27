@@ -80,7 +80,7 @@ def build(con=None):
     cards = "".join(
         f"<div class=bi data-i={i} data-t='{'ok' if v['transcript_status'] == 'ok' or (v['transcript_status'] is None and v['transcript']) else 'fail'}' data-p='{e(v['processed_at'] or v['processed_date'] or '')}' data-d='{e(v['upload_date'] or '0000-00-00')}' data-c='{e(v['category'] or '기타')}' data-s='{e((v['category'] or '기타') + '/' + (v['subtag'] or '기타'))}' hidden>{R.card(con, v)}</div>"
         for i, v in enumerate(vs))
-    body = (f"<h1>🗂️ 날짜·주제별 보기</h1><p class=meta>분석한 영상 {len(vs)}개 · YouTube 정렬 기준(업로드/처리날짜)별로 같은 날 영상끼리 묶어 1일 리포트 형식으로 보여 줍니다 · 주제 옆 <b>(전체)-N</b> 은 오늘 처리된 영상 수 · <a href='index.html'>🏠 홈</a></p>"
+    body = (f"<h1>🗂️ 날짜·주제별 보기</h1><p class=meta>분석한 영상 {len(vs)}개 · YouTube 정렬 기준(업로드/처리날짜)별로 같은 날 영상끼리 묶어 1일 리포트 형식으로 보여 줍니다 · 주제 옆 <b>(전체)-N</b> 은 오늘 처리된 영상 수 · <a href='tags.html'>🏷️ 태그별 보기</a> · <a href='index.html'>🏠 홈</a></p>"
             f"<div class=bar id=bi-top><label>🏷️ 주제 <select id=f-topic>{topic}</select></label>"
             f"<label>📅 기간 <select id=f-recent>{recent}</select></label>"
             f"<label>↕️ 정렬 <select id=f-sort>{sort}</select></label>"
