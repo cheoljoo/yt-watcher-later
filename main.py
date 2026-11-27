@@ -85,9 +85,10 @@ def run_pipeline(con, targets, refresh=False):
     todo = [v for v in targets if v["id"] in got]
     print(f"[2/3] 분석 {len(todo)}개 (병렬 {cfg.get('parallel_analyze', 2)}, 영상별 개별 호출)", flush=True)
     voc, today, n, stop, errs = vocab(con), D.today(), 0, False, []
+    known = indicators.known_names(con)
     def one(v):
         if stop: return v, None, None
-        try: return v, analyze(v, got[v["id"]], voc, today, cfg["model"]), None
+        try: return v, analyze(v, got[v["id"]], voc, today, cfg["model"], known), None
         except Exception as ex: return v, None, ex
     with ThreadPoolExecutor(max(1, cfg.get("parallel_analyze", 2))) as ex:
         for v, res, err in ex.map(one, todo):

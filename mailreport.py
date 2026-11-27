@@ -135,7 +135,7 @@ def build(diff, names, label, status, meta, problems, commits, report_url):
         section("확인이 필요한 로그", [esc(p, 400) for p in problems]),
         section("새 영상", videos), section("다시 분석한 영상", analyses), section("서비스 서버에서 받은 입력", inputs),
         section("의견", opinions), section("버튼(직접 해보기·인상 깊은 영상)", marks), section("인상 깊었던 영상 추가", marked),
-        section("확인 항목 판정", judged), section("소스 변경(커밋)", [esc(c) for c in commits]),
+        section("확인 항목 판정", judged), section("새로 등록한 지표", [esc(r.get("name")) + small(esc(r.get("category"))) for r in added("indicators")]), section("소스 변경(커밋)", [esc(c) for c in commits]),
     ])
     if table:
         body += (f'<div class="card" style="background:#ffffff;border:1px solid #e4e7ec;border-radius:10px;padding:14px 16px;margin:0 0 12px">'

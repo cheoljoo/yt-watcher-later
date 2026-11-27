@@ -3,10 +3,16 @@ import json, subprocess
 
 CATEGORIES = ["경제", "AI", "IT", "정치·사회", "과학·건강", "기타"]
 
+TRACK_ITEM = {"type": "object", "required": ["name", "why"], "properties": {"name": {"type": "string"}, "why": {"type": "string"}}}
+# track_metrics 를 뽑는 기준 (새 영상 분석과 기존 영상 채우기가 같이 씀)
+TRACK_RULE = ("배울 점(lessons)과 나중에 확인할 것(checks, kind=event 포함)을 실제로 점검하려면 꾸준히 봐야 하는 '숫자로 된 지표·종목'. "
+              "시간에 따라 값이 새로 나오는 것만(금리·물가·환율·지수·거래량·가격·점유율·실적·종목 등). 사건·일정·제도 이름, 행동·습관·개념, 한 번만 확인하면 끝나는 것은 넣지 마세요. "
+              "name 은 짧은 지표 이름 하나(예: 미국 10년물 국채금리, 삼성전자), why 는 어느 배울 점·확인 항목 때문인지 한 문장. 해당이 없으면 빈 배열(억지로 만들지 말 것), 많아도 5개.")
+
 SCHEMA = {
   "type": "object",
   "required": ["category", "subtag", "extra_tags", "one_liner", "summary_points", "keywords",
-               "people", "links", "comments_insight", "lessons", "business", "macro", "checks"],
+               "people", "links", "comments_insight", "lessons", "business", "macro", "checks", "track_metrics"],
   "properties": {
     "category": {"type": "string", "enum": CATEGORIES},
     "subtag": {"type": "string"},
@@ -38,6 +44,7 @@ SCHEMA = {
                               "if_right": {"type": "string", "description": "예상이 맞았을 때 시청자가 어떻게 해야 하는지(행동·판단)"},
                               "if_wrong": {"type": "string", "description": "예상이 틀렸을 때 시청자가 어떻게 해야 하는지(행동·판단)"},
                               "check_date": {"type": "string", "description": "YYYY-MM-DD, 반드시 오늘 이후"}}}},
+    "track_metrics": {"type": "array", "items": TRACK_ITEM},
   },
 }
 
@@ -64,6 +71,8 @@ PROMPT = """당신은 YouTube 영상 분석가입니다. 아래 입력(제목/�
   what_to_check(무엇을 확인), expectation(영상의 예상·주장), check_date(확인할 미래 날짜 YYYY-MM-DD, 오늘 이후 — 발표일·만기·실적일 등
   구체적 시점이 있으면 그 날짜, 없으면 합리적 시점). 경제 영상은 가능하면 2~6개, 그 외는 근거가 있을 때만.
   if_right = 예상이 맞았을 때 시청자가 어떻게 해야 하는지(보유 유지·비중 확대·계획 진행 등 구체적 행동·판단), if_wrong = 예상이 틀렸을 때 어떻게 해야 하는지(손절·재검토·계획 수정 등). 투자 권유가 아니라 판단 기준으로 쓰세요.
+- track_metrics: {track_rule}
+  아래 '이미 있는 지표'와 같은 것이면 이름을 글자 그대로 쓰세요: {known}
 - 영상에 없는 내용을 지어내지 마세요.
 """
 
@@ -71,7 +80,7 @@ class UsageLimit(RuntimeError): pass
 
 def _limit(msg): m = msg.lower(); return "429" in m or "usage limit" in m or "rate limit" in m
 
-def build_request(video, collected, vocab, today, max_chars=None):
+def build_request(video, collected, vocab, today, max_chars=None, known=()):
     """-> (prompt, body). max_chars 가 있으면 자막이 그보다 길 때 앞·뒤만 남긴다(스킬 모드: 컨텍스트 보호)."""
     info, cm = collected["info"], collected["info"].get("comments") or []
     comments = "\n".join(f"- ({c.get('like_count',0)}👍) {c.get('text','')[:300]}" for c in cm[:40]) or "(없음)"
@@ -81,11 +90,12 @@ def build_request(video, collected, vocab, today, max_chars=None):
     body = (f"[제목] {video['title']}\n[채널] {collected['meta']['channel']}\n[업로드] {collected['meta']['upload_date']}\n"
             f"[설명]\n{(info.get('description') or '')[:2500]}\n\n[댓글]\n{comments}\n\n"
             f"[자막]\n{tr or '(자막 없음 — 제목/설명/댓글만으로 분석, 불확실하면 명시)'}")
-    prompt = PROMPT.format(today=today, cats=", ".join(CATEGORIES), vocab=", ".join(vocab) or "(없음)")
+    prompt = PROMPT.format(today=today, cats=", ".join(CATEGORIES), vocab=", ".join(vocab) or "(없음)",
+                           track_rule=TRACK_RULE, known=", ".join(known) or "(없음)")
     return prompt, body
 
-def analyze(video, collected, vocab, today, model="sonnet"):
-    prompt, body = build_request(video, collected, vocab, today)
+def analyze(video, collected, vocab, today, model="sonnet", known=()):
+    prompt, body = build_request(video, collected, vocab, today, known=known)
     r = subprocess.run(["claude", "-p", prompt, "--model", model, "--tools", "", "--no-session-persistence",
                         "--output-format", "json", "--json-schema", json.dumps(SCHEMA)],
                        input=body, capture_output=True, text=True, timeout=900)

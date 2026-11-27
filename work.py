@@ -17,12 +17,13 @@ import db as D
 import main as M
 import opinions as OP, indicators as I, autocheck as A, events as EVT, rich as RICH, report, export_json
 from analyze import SCHEMA as VIDEO_SCHEMA, build_request, CATEGORIES
+import track as TRACK
 from fetcher import collect_many, write_log
 
 W = pathlib.Path("data/_work")
 COL, TASKS, INP, SCH, STATE = W / "col", W / "tasks", W / "in", W / "schema", W / "state.json"
-STAGES = ["video", "enrich", "map", "meaning", "phase", "check", "checkfill", "opinion", "events", "rich"]
-SCHEMAS = {"video": VIDEO_SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA, "checkfill": A.FILL_SCHEMA, "opinion": OP.SCHEMA, "events": EVT.SCHEMA, "rich": RICH.SCHEMA}
+STAGES = ["video", "track", "enrich", "map", "meaning", "phase", "check", "checkfill", "opinion", "events", "rich"]
+SCHEMAS = {"video": VIDEO_SCHEMA, "track": TRACK.SCHEMA, "enrich": I.ENRICH, "map": I.MAP, "meaning": I.MEANING, "phase": I.PHASE, "check": A.SCHEMA, "checkfill": A.FILL_SCHEMA, "opinion": OP.SCHEMA, "events": EVT.SCHEMA, "rich": RICH.SCHEMA}
 MAX_TRANSCRIPT = 60000      # 자막이 이보다 길면 앞·뒤만 남김(컨텍스트 보호). 중앙값은 약 9천자.
 cfg = M.cfg
 import os
@@ -56,7 +57,7 @@ def chunks(xs, n): return [xs[i:i + n] for i in range(0, len(xs), n)]
 # ── 단계별 작업 생성 ─────────────────────────────────────────────
 def gen_video(con, st):
     done = {r[0] for r in con.execute("SELECT id FROM videos WHERE status='done'")}
-    voc, today = M.vocab(con), D.today()
+    voc, today, known = M.vocab(con), D.today(), I.known_names(con)
     reanalyze = {r[0] for r in con.execute("SELECT id FROM videos WHERE transcript_status IN ('pending_retry','meta_only')")}
     allowed = int(os.environ.get("MAX_ANALYZE") or cfg.get("max_analyze", 30)) - len(tried(st, "video"))      # 이번 실행(collect~finish)에서 더 분석할 수 있는 수
     cols = [json.loads(f.read_text(encoding="utf-8")) | {"f": f} for f in (COL.glob("*.json") if COL.exists() else [])]
@@ -68,8 +69,16 @@ def gen_video(con, st):
         allowed -= 1
         ip = M.DATA / v["id"] / f"{v['id']}.info.json"
         col["info"] = json.loads(ip.read_text(encoding="utf-8")) if ip.exists() else {}
-        prompt, body = build_request(v, col, voc, today, max_chars=MAX_TRANSCRIPT)
+        prompt, body = build_request(v, col, voc, today, max_chars=MAX_TRANSCRIPT, known=known)
         write_task("video", [v["id"]], prompt, body)
+
+def gen_track(con, st):
+    """예전 영상의 배울 점·확인 항목에서 추적 지표 뽑기(한 번 실행에 track_backfill_per_run 개까지)."""
+    left = int(cfg.get("track_backfill_per_run", 40)) - len(tried(st, "track"))
+    if left <= 0: return
+    rows = [r for r in TRACK.pending(con, left + len(tried(st, "track"))) if r["id"] not in tried(st, "track")][:left]
+    known = I.known_names(con) if rows else []
+    for ch in chunks(rows, TRACK.CHUNK): write_task("track", [r["id"] for r in ch], TRACK.prompt(known), "\n".join(TRACK.task_line(con, r) for r in ch))
 
 def gen_enrich(con, st):
     I.register(con)
@@ -130,7 +139,7 @@ def gen_rich(con, st):
     if "rich" in tried(st, "rich") or not RICH.need_today(con): return
     write_task("rich", ["rich"], RICH.prompt(), RICH.task_body(con))
 
-GEN = {"video": gen_video, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion, "events": gen_events, "rich": gen_rich}
+GEN = {"video": gen_video, "track": gen_track, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion, "events": gen_events, "rich": gen_rich}
 
 
 # ── 명령 ────────────────────────────────────────────────────────
@@ -229,6 +238,7 @@ def cmd_submit(a):
         d = json.loads((COL / f"{t['keys'][0]}.json").read_text(encoding="utf-8"))
         M.store(con, d["v"], d["col"], data, os.environ.get("YT_MODEL") or cfg["model"], os.environ.get("YT_ENGINE") or "claude"); (COL / f"{t['keys'][0]}.json").unlink()
         msg = f"저장 {d['v']['owner']}/{d['v']['id']} [{data['category']}/{data['subtag']}] 확인항목 {len(data['checks'])}개"
+    elif kind == "track": msg = f"추적 지표 추출 {TRACK.apply(con, data['items'])}개 영상"
     elif kind == "enrich": I.apply_enrich(con, data["items"]); msg = f"지표 설명 {len(data['items'])}개"
     elif kind == "map": I.apply_map(con, data["items"]); msg = f"출처 매핑 {len(data['items'])}개"
     elif kind == "meaning": I.apply_meaning(con, data["items"]); msg = f"의미 해설 {len(data['items'])}개"

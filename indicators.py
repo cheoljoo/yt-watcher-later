@@ -38,17 +38,52 @@ MAP_PROMPT = ("각 지표/종목을 실제 시세를 받을 수 있는 출처에
               "fred(FRED 시리즈 ID: UNRATE, CPIAUCSL, PCEPI, PAYEMS, FEDFUNDS, T10Y2Y, DGS10, DGS2, M2SL, WALCL, BAMLH0A0HYM2 등) | none(재무비율·전망치·질적 판단처럼 시세 시리즈가 없는 것). "
               "확실한 심볼만 쓰고, 모호하면 none. symbol은 source가 none이면 빈 문자열. name은 입력 그대로.")
 
+def _key(name):
+    """띄어쓰기·대소문자만 다른 이름을 같은 지표로 보기 위한 비교값."""
+    return "".join(name.split()).casefold()
+
+
+def root_id(con, iid):
+    """병합된 별칭이면 끝까지 따라가 대표 지표 id 를 돌려준다(별칭의 별칭도 있다)."""
+    seen = set()
+    while iid not in seen:
+        seen.add(iid)
+        row = con.execute("SELECT alias_of FROM indicators WHERE id=?", (iid,)).fetchone()
+        if not row or not row["alias_of"]: break
+        iid = row["alias_of"]
+    return iid
+
+
+def known_names(con, limit=200):
+    """AI 에게 '같으면 이 이름을 그대로 쓰라'고 알려 줄 지표 이름(시세 출처가 있는 대표 지표, 출처 영상이 많은 순)."""
+    return [r[0] for r in con.execute(
+        """SELECT i.name FROM indicators i LEFT JOIN indicator_sources s ON s.indicator_id=i.id
+           WHERE i.alias_of IS NULL AND i.source IS NOT NULL AND i.source!='none' GROUP BY i.id ORDER BY count(s.video_id) DESC, i.id LIMIT ?""", (limit,))]
+
+
 def register(con):
-    """영상 분석에서 나온 '봐야 할 지표'와 종목 확인항목을 지표 테이블에 등록(이미 있으면 출처만 추가)."""
+    """영상 분석에서 나온 '봐야 할 지표', 배울 점·확인 항목에서 뽑은 추적 지표(track_metrics), 지표·종목 확인항목을 지표 테이블에 등록.
+    이미 있으면(띄어쓰기·대소문자 차이, 병합된 별칭 포함) 그 지표에 출처 영상만 추가한다."""
+    similar = {}
+    for r in con.execute("SELECT id, name FROM indicators ORDER BY id"):
+        similar.setdefault(_key(r["name"]), r["id"])
     def add(name, vid, why, cat=None):
         name = (name or "").strip()
         if not name: return
-        con.execute("INSERT OR IGNORE INTO indicators(name,category,first_seen_at) VALUES(?,?,?)", (name, cat, D.now()))
-        iid = con.execute("SELECT id FROM indicators WHERE name=?", (name,)).fetchone()[0]
+        row = con.execute("SELECT id FROM indicators WHERE name=?", (name,)).fetchone()
+        iid = row["id"] if row else similar.get(_key(name))
+        if iid is not None: iid = root_id(con, iid)
+        else:
+            iid = con.execute("INSERT INTO indicators(name,category,first_seen_at) VALUES(?,?,?)", (name, cat, D.now())).lastrowid
+            similar[_key(name)] = iid
         con.execute("INSERT OR IGNORE INTO indicator_sources VALUES(?,?,?)", (iid, vid, why))
     import indicator_seed; indicator_seed.seed(con)       # 영상과 무관하게 항상 추적할 기본 지표(증시 자금·국내 부동산)
     for r in con.execute("SELECT id, indicators_to_watch FROM videos WHERE status='done' AND indicators_to_watch IS NOT NULL").fetchall():
         try: items = json.loads(r["indicators_to_watch"])
+        except Exception: continue
+        for i in items: add(i.get("name"), r["id"], i.get("why"))
+    for r in con.execute("SELECT id, analysis_json FROM videos WHERE status='done' AND analysis_json LIKE '%\"track_metrics\"%'").fetchall():
+        try: items = json.loads(r["analysis_json"]).get("track_metrics") or []
         except Exception: continue
         for i in items: add(i.get("name"), r["id"], i.get("why"))
     for c in con.execute("SELECT video_id, target, what_to_check FROM checks WHERE kind IN ('indicator','stock')").fetchall():

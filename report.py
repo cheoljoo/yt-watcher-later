@@ -93,6 +93,9 @@ def card(con, v):
     if lks: h += "<h2>🔗 언급된 소스/링크</h2><ul>" + "".join(f"<li>[{e(l['kind'])}] <a href='{e(l['url'])}'>{e(l['url'])}</a> <span class=meta>{e(l['context'])}</span></li>" for l in lks) + "</ul>"
     les = L(v["lessons"])
     if les: h += "<h2>🎓 이 영상에서 배울 점</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in les) + "</ul>"
+    trk = (L(v["analysis_json"]) or {})
+    trk = trk.get("track_metrics") if isinstance(trk, dict) else None
+    if trk: h += "<h2>📈 지표로 추적 (배울 점·확인할 것에서)</h2><ul>" + "".join(f"<li><b>{e(i['name'])}</b> — {e(i['why'])}</li>" for i in trk) + "</ul>"
     biz = L(v["business"])
     if biz:
         icon = {"가능": "💰", "조건부": "🟡", "어려움": "⚪"}.get(biz.get("possible"), "💰")

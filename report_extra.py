@@ -181,6 +181,24 @@ def seed_pending_block(con):
     items = "".join(f"<li {F.attrs({'name': r['name'], 'category': r['category'], 'source': 'none', 'symbol': ''}, False)}><b>{e(r['name'])}</b> <span class=meta>{e(r['category'] or '')}</span></li>" for r in con.execute(f"SELECT name,category FROM indicators WHERE name IN ({','.join('?' * len(names))}) ORDER BY category,name", names))
     return f"<section class=card><h3>📭 값이 아직 없는 기본 지표 ({len(names)})</h3><p class=meta>공식 OpenAPI 인증키(한국부동산원 R-ONE·한국은행 ECOS·국토교통부)나 유료 컨센서스가 있어야 자동 수집할 수 있어 아직 연결되지 않았습니다. 지표 정의는 DB에 등록돼 있습니다.</p><ul>{items}</ul></section>"
 
+def pinned_block(con, head, srcs):
+    """config.toml pinned_indicators: 꼭 챙겨 볼 지표 묶음. 각 지표의 가장 최근 값을 보여 준다(그날 값이 없어도)."""
+    import tomllib, pathlib, indicators as I
+    try: groups = tomllib.loads((pathlib.Path(__file__).resolve().parent / "config.toml").read_text(encoding="utf-8")).get("pinned_indicators") or []
+    except Exception: return ""
+    out = ""
+    for g in groups:
+        cards, missing = "", []
+        for name in g.get("indicators", []):
+            row = con.execute("SELECT id FROM indicators WHERE name=?", (name,)).fetchone()
+            r = row and con.execute("""SELECT i.*, v.value, v.value_text, v.value_date, v.prev_value, v.change_pct, v.direction, v.signal, v.signal_reason, v.meaning, v.llm
+                                       FROM indicator_values v JOIN indicators i ON i.id=v.indicator_id WHERE i.id=? ORDER BY v.date DESC LIMIT 1""", (I.root_id(con, row["id"]),)).fetchone()
+            if r: cards += _ind_card(r, r, srcs(r["id"]), False)
+            else: missing.append(name)
+        out += f"<h4>{e(g.get('title', ''))}</h4><p class=meta>{e(g.get('why', ''))}</p>" + (head + cards + "</table>" if cards else "")
+        if missing: out += f"<p class=meta>값이 아직 없음: {e(', '.join(missing))}</p>"
+    return f"<section class=card id=sec-pin><h3>🎯 핵심 확인 지표</h3>{out}</section>" if out else ""
+
 def build_indicators(con):
     last = con.execute("SELECT max(date) FROM indicator_values").fetchone()[0]
     body = "<h1>📊 지표 대시보드</h1><p class=meta><a href='index.html'>🏠 홈</a> · <a href='checks_pending.html'>앞으로 확인할 것</a> · <a href='checks_done.html'>확인한 것</a> · <a href='indicator_trends.html'>📉 지표 추이(그래프·상황 설명)</a> · <a href='linkage.html'>🔗 지표 연결(이어진 지표를 묶어 분석)</a></p>" + IND_LEGEND + macro_block(con)
@@ -196,6 +214,7 @@ def build_indicators(con):
     import indfilter as F
     from report import CAT_ICON as CI
     body += F.BAR
+    body += pinned_block(con, head, srcs)
     body += f"<section class='card due' id=sec-chg><h3>🚨 {e(last)} 변화·경고 (<span data-count-of=sec-chg>{len(changed)}</span>)</h3><p class=meta>값이 조금 바뀐 것이 아니라 방향이 바뀌었거나 임계값을 넘거나 경고인 것만 · 위의 국가·분류 선택이 여기에도 적용됩니다</p>"
     body += (head + "".join(_ind_card(r, r, srcs(r["id"]), False) for r in changed) + "</table>") if changed else "<p class=meta>오늘은 해당 항목이 없습니다.</p>"
     body += "</section>"
