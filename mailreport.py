@@ -220,8 +220,8 @@ def send(conf, service, subject, page, files):
     return True
 
 
-def report(since=None, log=None, exit_code=0, dry=None, note=None, tail=None):
-    """메일 하나를 만들어 보낸다. note: 로그 대신 문제 줄을 찾을 글(서비스 서버의 이번 결과). 반환: 보냈는지."""
+def report(since=None, log=None, exit_code=0, dry=None, note=None, tail=None, started=None):
+    """메일 하나를 만들어 보낸다. note: 로그 대신 문제 줄을 찾을 글(서비스 서버의 이번 결과). started: cron 작업의 시작 시각(없으면 since). since 와 달리 첨부 파일을 늘리지 않는다. 반환: 보냈는지."""
     service = role.raw_role()[0] == "service"
     conf, hide = read_env(ENV_FILE), secrets()
     start = datetime.datetime.fromisoformat(since) if since else None
@@ -232,7 +232,10 @@ def report(since=None, log=None, exit_code=0, dry=None, note=None, tail=None):
     status = "실패" if exit_code else ("확인 필요" if problems else "정상")
     now = datetime.datetime.now()
     meta = f"{now:%Y-%m-%d %H:%M} 기준"
-    if start: meta = f"{start:%Y-%m-%d %H:%M} 시작 · {int((now - start).total_seconds() // 60)}분 · 종료코드 {exit_code}"
+    begin = datetime.datetime.fromisoformat(started) if started else start
+    if begin:   # 끝 = 메일을 보내는 시각
+        m, s = divmod(max(0, int((now - begin).total_seconds())), 60)
+        meta = f"cron 시작 {begin:%Y-%m-%d %H:%M:%S} · 끝(메일 보냄) {now:%Y-%m-%d %H:%M:%S} · 걸린 시간 {m}분 {s}초 · 종료코드 {exit_code}"
     commits, head = new_commits()
     page, counts = build(diff, titles(new) if new.exists() else {}, role.label(), status, meta, problems, commits, conf.get("REPORT_URL", ""))
     page = redact(page, hide)

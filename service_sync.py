@@ -16,7 +16,7 @@
 역할이 service 일 때만 일한다. cron 으로 10분마다 돌려도 백업이 그대로면 곧바로 끝난다(이때는 소스도 pull 하지 않는다).
 이 서버의 백업 폴더는 읽기 전용 사본이다 — push 하지 않고 원격(origin)과 똑같이 맞춘다(fetch + reset --hard).
 inbox 파일은 건드리지 않는다(읽기만): 사용자가 누른 입력은 inbox 에 있고 개발 서버가 가져가 원본 DB 에 반영한다."""
-import json, os, pathlib, socket, sqlite3, subprocess, sys
+import datetime, json, os, pathlib, socket, sqlite3, subprocess, sys
 import db as D, dbbackup as B, inbox, inbox_apply, role
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -24,6 +24,7 @@ STATE = ROOT / "data" / "_service"
 LAST = STATE / "last_backup_time"       # 마지막으로 복원한 백업의 BACKUP_TIME 내용
 PENDING = STATE / "pending"             # 복원 뒤 아직 못 끝낸 일 {"restart": true|false}
 RESTART_ENV = "YT_RESTART_NEEDED"       # 새 코드로 다시 실행할 때 '재시작 필요'를 넘기는 환경변수
+STARTED_ENV = "YT_SYNC_STARTED"         # 이번 cron 실행의 시작 시각(결과 메일 본문). 새 코드로 다시 실행해도 그대로 넘어간다
 
 
 def _git(where, *args):
@@ -141,11 +142,13 @@ def notify(message, failed):
     else:
         mark.unlink(missing_ok=True)
         if not message.startswith(("복원 완료", "지난번에 못 끝낸 일")): return
-    sent = mailreport.safe_report(log=str(ROOT / "logs" / "service.log"), tail=200, note=message, exit_code=1 if failed else 0)
+    sent = mailreport.safe_report(log=str(ROOT / "logs" / "service.log"), tail=200, note=message, exit_code=1 if failed else 0,
+                                 started=os.environ.get(STARTED_ENV))
     if failed and sent: STATE.mkdir(parents=True, exist_ok=True); mark.write_text(message, encoding="utf-8")
 
 
 if __name__ == "__main__":
+    os.environ.setdefault(STARTED_ENV, datetime.datetime.now().isoformat(sep=" ", timespec="seconds"))
     try: message = run("--force" in sys.argv)
     except Exception as e:
         print("서비스 동기화 실패:", repr(e), flush=True)
