@@ -54,6 +54,20 @@ def take():
         return out
 
 
+def peek():
+    """아직 안 가져간 입력을 닫거나 지우지 않고 읽기만 한다: [{"name", "lines":[이벤트…]}] (쌓인 순서)."""
+    with _Lock():
+        files = sorted(p for p in DIR.glob("inbox-*.jsonl") if NAME.match(p.name)) + ([CUR] if CUR.exists() else [])
+        out = []
+        for p in files:
+            evs = []
+            for ln in p.read_text(encoding="utf-8").splitlines():
+                try: evs.append(json.loads(ln))
+                except ValueError: pass
+            out.append({"name": p.name, "lines": evs})
+        return out
+
+
 def ack(names):
     """받아 간 닫힌 파일을 지운다(이름 규칙에 맞는 것만). 반환: 지운 개수."""
     n = 0

@@ -1,11 +1,23 @@
 """나의 의견 + AI 의견: DB 함수, 영상 카드용 입력 칸(HTML/JS), '나와 AI 의견' 페이지(reports/opinions.html).
 - 나의 의견은 리포트의 저장 버튼 -> opinion_server.py -> opinions 표.   AI 의견은 cron(work.py 'opinion' 단계)이 채운다.
 - AI 의견이 달린 항목은 더 이상 편집하지 않는다."""
-import json
+import contextlib, contextvars, json, re
 from html import escape as e
 import db as D
 
 MAX_LEN = 5000
+_AT = contextvars.ContextVar("input_at", default=None)
+
+def now():
+    """입력 시각: inbox 를 반영하는 중이면 사용자가 누른 시각(at), 아니면 지금."""
+    return _AT.get() or D.now()
+
+@contextlib.contextmanager
+def at(ts):
+    """이 블록의 저장은 ts(inbox 에 적힌 누른 시각)로 기록한다. 형식이 이상하면 지금 시각."""
+    token = _AT.set(ts if re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", str(ts or "")) else None)
+    try: yield
+    finally: _AT.reset(token)
 
 def get(con, vid):
     return con.execute("SELECT * FROM opinions WHERE video_id=?", (vid,)).fetchone()
@@ -23,9 +35,11 @@ def save_mine(con, vid, text):
     cur = get(con, vid)
     if cur and cur["ai_reply"]: return False, "AI 의견이 이미 달려 더 이상 수정할 수 없습니다"
     if not text:
-        con.execute("DELETE FROM opinions WHERE video_id=?", (vid,)); con.commit(); return True, "삭제했습니다"
+        con.execute("DELETE FROM opinions WHERE video_id=?", (vid,))
+        con.execute("UPDATE opinion_actions SET on_flag=0, done=0, done_at=NULL WHERE video_id=?", (vid,))     # 지운 의견의 action 이 새 의견에 되살아나지 않게(메모는 보관)
+        con.commit(); return True, "삭제했습니다"
     con.execute("INSERT INTO opinions(video_id,my_opinion,my_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET my_opinion=excluded.my_opinion, my_at=excluded.my_at",
-                (vid, text, D.now()))
+                (vid, text, now()))
     con.commit()
     return True, "저장했습니다. AI 의견은 다음 새벽 실행에서 달립니다"
 
@@ -35,7 +49,7 @@ TABLES = {"video": "actions", "opinion": "opinion_actions"}
 
 def _flag(con, table, vid, on):
     con.execute(f"INSERT INTO {table}(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
-                (vid, 1 if on else 0, D.now()))
+                (vid, 1 if on else 0, now()))
     con.commit()
     return True, "직접 해볼 것으로 표시했습니다" if on else "표시를 해제했습니다 (남긴 메모는 그대로 보관됩니다)"
 
@@ -56,7 +70,7 @@ def save_action_comment(con, vid, text, kind="video"):
     if len(text) > MAX_LEN: return False, f"{MAX_LEN}자까지 저장할 수 있습니다"
     table = TABLES[kind]
     if not _marked(con, table, vid): return False, "액션으로 표시된 항목이 아닙니다"
-    con.execute(f"UPDATE {table} SET comment=?, comment_at=? WHERE video_id=?", (text, D.now(), vid))
+    con.execute(f"UPDATE {table} SET comment=?, comment_at=? WHERE video_id=?", (text, now(), vid))
     con.commit()
     return True, "저장했습니다"
 
@@ -64,7 +78,7 @@ def set_done(con, vid, done, kind="video"):
     """'Action Done': 액션을 실제로 했다는 표시(다시 누르면 해제)."""
     table = TABLES[kind]
     if not _marked(con, table, vid): return False, "액션으로 표시된 항목이 아닙니다"
-    con.execute(f"UPDATE {table} SET done=?, done_at=? WHERE video_id=?", (1 if done else 0, D.now() if done else None, vid))
+    con.execute(f"UPDATE {table} SET done=?, done_at=? WHERE video_id=?", (1 if done else 0, now() if done else None, vid))
     con.commit()
     return True, "처리완료로 표시했습니다" if done else "처리완료 표시를 해제했습니다"
 
@@ -82,7 +96,7 @@ def set_star(con, vid, on):
     if not (con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone() or con.execute("SELECT 1 FROM highlights WHERE video_id=?", (vid,)).fetchone()):
         return False, "알 수 없는 영상입니다"
     con.execute("INSERT INTO stars(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
-                (vid, 1 if on else 0, D.now()))
+                (vid, 1 if on else 0, now()))
     con.commit()
     return True, "별표를 달았습니다 — 인상 깊은 영상 페이지에 나옵니다" if on else "별표를 뗐습니다 (상세 분석이 있었다면 DB에 그대로 보관됩니다)"
 

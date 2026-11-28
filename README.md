@@ -33,7 +33,7 @@ YouTube 재생목록(예: `my-watch-later`)에 저장해 둔 영상을 매일 �
 |---|---|---|
 | 하는 일 | 수집·AI 분석·확인 판정·리포트 생성, **DB 원본** | 웹 서비스(nginx + `opinion_server.py`), 사용자 입력 받기 |
 | 매일 | cron 01:00 `run_skill.sh --agy` | cron 10분마다 `service_sync.py` (백업 pull → 복원) |
-| DB | 원본. 서비스 서버 입력(inbox)을 맨 처음 반영한 뒤 AI 작업 | 백업에서 **다시 만든 사본**(입력은 고쳐도 다음 복원 때 덮어써짐 — 이미 inbox 로 개발 및 AI 실행 서버에 갔으므로 상관없음) |
+| DB | 원본. 서비스 서버 입력(inbox)을 맨 처음 반영한 뒤 AI 작업 | 백업에서 **다시 만든 사본**(복원하면 덮어쓰지만, 개발 및 AI 실행 서버가 아직 안 가져간 inbox 입력은 복원 직후 다시 반영) |
 | 백업 | 끝날 때 덤프 → `BACKUP_TIME` 기록 → commit·push | **pull 만** 한다(읽기 전용 사본). `BACKUP_TIME` 2행(만든 컴퓨터)이 **자기 자신이면 복원하지 않는다** — 자기 DB 가 더 새것이라서 |
 | 갱신 전 DB 사본 | 일일 실행 시작 때 `data/watchlater.db.bak` 한 개(덮어씀) | 새 백업이 확인돼 **교체하기 직전에만** `data/watchlater.db.bak` 한 개(덮어씀) |
 | 입력(의견·액션·별표) | 서비스 서버 inbox 를 가져와 DB 에 반영하고 ack | 저장하면 DB 와 **inbox 에 한 줄씩 쌓는다** |
@@ -94,7 +94,7 @@ flowchart TD
     B --> C{"개발 및 AI 실행 서버 cron 01:00 시작"}
     C --> D["① inbox_apply.py: ssh 로 서비스 서버에서 <code>inbox.py close</code><br/>쌓던 파일을 닫고(이름 변경) 닫힌 파일 목록을 받음<br/>※ 이후 도착하는 입력은 새 current 에 쌓임"]
     D --> D2["② scp 로 닫힌 파일을 개발 및 AI 실행 서버로 가져옴"]
-    D2 --> E["③ 이벤트 id 로 중복을 걸러 시각순으로 개발 DB 에 반영<br/>(AI 의견이 이미 달린 항목 수정 등은 거부, 사유 기록: 표 inbox_applied)"]
+    D2 --> E["③ 이벤트 id 로 중복을 걸러 시각순으로 개발 DB 에 반영(표시일·처리완료일은 누른 시각)<br/>(AI 의견이 이미 달린 항목 수정 등은 거부, 사유 기록: 표 inbox_applied)"]
     E --> F["④ DB commit 뒤에만 ssh 로 <code>inbox.py ack</code> —<br/>반영한 닫힌 파일만 서비스 서버에서 삭제"]
     F --> G["⑤ 수집 → AI 분석 → 지표 시세 → 확인 판정 → 의견 답 → 리포트 생성"]
     G --> H["⑥ dbbackup.py sync<br/>덤프 → README·HISTORY·<b>BACKUP_TIME</b> 갱신 → commit → git gc → push"]
@@ -103,7 +103,7 @@ flowchart TD
     J -- "같음 (또는 자기가 만든 백업)" --> K["아무것도 안 함 (기존 DB 로 계속 서비스)"]
     J -- "다름" --> P["⑦ 프로젝트 소스 git pull --ff-only<br/>(바뀌었으면 새 코드로 다시 실행)"]
     P --> L["⑧ 새 파일(watchlater.db.new)로 복원 → 행 수 검증<br/>→ 기존 DB 를 watchlater.db.bak 으로 복사 → os.replace 로 교체"]
-    L --> M["⑨ 리포트 다시 만들기 (YT_NO_FETCH=1: 시세·AI 없이 DB 값만)"]
+    L --> M["⑨ 남은 inbox 입력 다시 반영 → 리포트 다시 만들기 (YT_NO_FETCH=1: 시세·AI 없이 DB 값만)"]
     M --> R{"소스의 .py 나 의존성이<br/>바뀌었나?"}
     R -- "예" --> S["⑩ 입력 서버(yt-opinion) 재시작"]
     R -- "아니오" --> N

@@ -103,7 +103,8 @@ def apply_files(con, files):
     ok_n = bad_n = dup = 0
     for ev in evs:
         if con.execute("SELECT 1 FROM inbox_applied WHERE id=?", (ev["id"],)).fetchone(): dup += 1; continue
-        try: ok, msg = apply_event(con, ev)
+        try:
+            with O.at(ev.get("ts")): ok, msg = apply_event(con, ev)           # 표시일·처리완료일은 반영한 때가 아니라 누른 때
         except Exception as ex: ok, msg = False, f"오류 {ex}"[:200]
         con.execute("INSERT INTO inbox_applied(id,ts,type,vid,ok,msg,applied_at) VALUES(?,?,?,?,?,?,?)", (ev["id"], ev.get("ts"), ev.get("type"), ev.get("vid"), int(bool(ok)), msg, D.now()))
         ok_n += bool(ok); bad_n += not ok

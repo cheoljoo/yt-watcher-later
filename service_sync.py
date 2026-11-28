@@ -8,16 +8,16 @@
   1. 프로젝트 소스 `git pull --ff-only` — 개발 서버에서 코드가 바뀌었을 수 있다. HEAD 가 바뀌면 새 코드로 이 스크립트를 다시 실행한다
      (이미 읽어 들인 옛 모듈로 만들지 않게; `uv run` 이라 의존성도 맞춰진다). pull 이 안 되면(로컬 변경·갈라짐) 지금 코드로 계속하고 로그에 남긴다.
   2. DB 복원: 새 파일(data/watchlater.db.new)로 만들어 행 수를 확인 → 기존 DB 를 watchlater.db.bak 으로 복사 → os.replace 로 교체.
-  3. HTML 다시 만들기(시세·AI·네트워크 없이 DB 값만).
+  3. inbox 에 남은 입력(개발 서버가 아직 안 가져간 것)을 복원한 DB 에 다시 반영하고, HTML 다시 만들기(시세·AI·네트워크 없이 DB 값만).
   4. 입력 서버(yt-opinion) 재시작 — 소스의 .py 나 의존성(pyproject.toml·uv.lock)이 바뀌었을 때만. 문서·Makefile 만 바뀌었거나 DB 만 바뀌면 재시작하지 않는다
      (서버는 요청마다 DB 를 새로 열므로 DB 교체에는 재시작이 필요 없다).
   3·4 가 실패하면 data/_service/pending 에 남겨 다음 회차에 다시 한다.
 
 역할이 service 일 때만 일한다. cron 으로 10분마다 돌려도 백업이 그대로면 곧바로 끝난다(이때는 소스도 pull 하지 않는다).
 이 서버의 백업 폴더는 읽기 전용 사본이다 — push 하지 않고 원격(origin)과 똑같이 맞춘다(fetch + reset --hard).
-입력은 건드리지 않는다: 사용자가 누른 입력은 inbox 에 있고 개발 서버가 가져가 원본 DB 에 반영한다."""
+inbox 파일은 건드리지 않는다(읽기만): 사용자가 누른 입력은 inbox 에 있고 개발 서버가 가져가 원본 DB 에 반영한다."""
 import json, os, pathlib, socket, sqlite3, subprocess, sys
-import db as D, dbbackup as B, role
+import db as D, dbbackup as B, inbox, inbox_apply, role
 
 ROOT = pathlib.Path(__file__).resolve().parent
 STATE = ROOT / "data" / "_service"
@@ -55,15 +55,24 @@ def restart_server():
     if p.returncode: raise RuntimeError(f"입력 서버 재시작 실패: {(p.stderr or p.stdout).strip()[-200:]}")
 
 
+def replay_inbox():
+    """복원한 DB 에 개발 서버가 아직 안 가져간 입력을 다시 반영한다(안 하면 다음 동기화까지 화면에서 사라져 보인다).
+    inbox 파일은 읽기만 한다. 개발 서버가 이미 반영한 이벤트는 DB 의 inbox_applied 에 있어 건너뛴다."""
+    con = D.connect()
+    try: return inbox_apply.apply_files(con, inbox.peek())[0]
+    finally: con.close()
+
+
 def finish_pending():
-    """복원 뒤의 일(HTML 생성, 필요하면 서버 재시작). 실패하면 PENDING 이 남아 다음 회차에 다시 한다."""
+    """복원 뒤의 일(남은 입력 다시 반영, HTML 생성, 필요하면 서버 재시작). 실패하면 PENDING 이 남아 다음 회차에 다시 한다."""
     restart = json.loads(PENDING.read_text(encoding="utf-8")).get("restart", False)
     os.environ["YT_NO_FETCH"] = "1"                                     # 시세·AI·네트워크 없이 복원한 DB 값으로만 페이지를 만든다
+    n = replay_inbox()
     import report
     report.build_all(D.connect())
     if restart: restart_server()
     PENDING.unlink()
-    return "리포트 다시 만듦" + (" · 입력 서버 재시작" if restart else " · 서버 재시작 불필요")
+    return (f"남은 입력 {n}건 다시 반영 · " if n else "") + "리포트 다시 만듦" + (" · 입력 서버 재시작" if restart else " · 서버 재시작 불필요")
 
 
 def restore(out, marker):
