@@ -6,7 +6,7 @@
 
 보내는 곳은 역할에 따라 다르다. 설정은 프로젝트 폴더의 .env (KEY=VALUE, 심볼릭 링크도 됨, git 에 올리지 않음)
   개발 서버(dev)    : 사내 SMTP 릴레이(인증 없음)   SMTP_HOST, SMTP_PORT(기본 25), MAIL_FROM, MAIL_TO
-  서비스 서버(service): Gmail(SSL 465)             GMAIL_SENDER, GMAIL_APP_PASSWORD, MAIL_TO(없으면 GMAIL_SENDER)
+  서비스 서버(service): Gmail(SSL 465)             GMAIL_SENDER, GMAIL_APP_PASSWORD, GMAIL_TO(없으면 GMAIL_SENDER). MAIL_TO 는 쓰지 않음
   공통(선택)        : REPORT_URL(메일의 '리포트 열기' 링크)
 MAIL_TO 는 쉼표로 여러 명. 설정이 없으면 보내지 않고 넘어간다. 메일 실패는 실행 결과에 영향을 주지 않는다."""
 import argparse, collections, datetime, gzip, html, pathlib, re, smtplib, sqlite3, subprocess, sys
@@ -198,7 +198,8 @@ def attachments(log, since, hide, tail=None):
 
 def send(conf, service, subject, page, files):
     sender = conf.get("GMAIL_SENDER") if service else conf.get("MAIL_FROM")
-    to = [x.strip() for x in (conf.get("MAIL_TO") or (sender if service else "") or "").split(",") if x.strip()]
+    # 받는 곳은 역할마다 다르다: 개발 서버 MAIL_TO(회사), 서비스 서버 GMAIL_TO 없으면 GMAIL_SENDER(개인 Gmail). 두 서버가 같은 .env 를 써도 섞이지 않게 서비스 서버는 MAIL_TO 를 보지 않는다
+    to = [x.strip() for x in ((conf.get("GMAIL_TO") or sender if service else conf.get("MAIL_TO")) or "").split(",") if x.strip()]
     need = ("GMAIL_SENDER", "GMAIL_APP_PASSWORD") if service else ("SMTP_HOST", "MAIL_FROM", "MAIL_TO")
     missing = [k for k in need if not conf.get(k)]
     if missing: print(f"메일 설정 없음({', '.join(missing)} — {ENV_FILE}) → 보내지 않음"); return False

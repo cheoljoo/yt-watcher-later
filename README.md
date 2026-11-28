@@ -255,7 +255,7 @@ Apache License 2.0 — [LICENSE](LICENSE) 참고.
 | 역할 | 보내는 때 | 보내는 방법 |
 |---|---|---|
 | 개발 및 AI 실행 서버 | `run_skill.sh` 가 끝날 때마다(실패 포함) | 사내 SMTP 릴레이 |
-| 서비스 서버 | 새 백업을 반영했을 때, 새로운 실패가 생겼을 때(같은 실패는 한 번만) | Gmail (앱 비밀번호) |
+| 서비스 서버 | 새 백업을 반영했을 때, 새로운 실패가 생겼을 때(같은 실패는 한 번만) | Gmail (앱 비밀번호). 받는 곳은 `GMAIL_TO`, 없으면 `GMAIL_SENDER` (`MAIL_TO` 는 개발 서버 전용) |
 
 설정은 프로젝트 폴더의 `.env` (권한 600, 심볼릭 링크도 됨, git 에 올리지 않음). 설정이 없으면 보내지 않고 넘어간다.
 
@@ -263,7 +263,7 @@ Apache License 2.0 — [LICENSE](LICENSE) 참고.
 # 개발 서버                      # 서비스 서버
 SMTP_HOST=<릴레이 주소>          GMAIL_SENDER=<주소>@gmail.com
 SMTP_PORT=25                     GMAIL_APP_PASSWORD=<앱 비밀번호>
-MAIL_FROM=<보내는 주소>          MAIL_TO=<받는 주소, 없으면 GMAIL_SENDER>
+MAIL_FROM=<보내는 주소>          GMAIL_TO=<받는 주소, 없으면 GMAIL_SENDER>
 MAIL_TO=<받는 주소, 쉼표 구분>
 REPORT_URL=<메일의 '리포트 열기' 주소, 선택>
 ```
