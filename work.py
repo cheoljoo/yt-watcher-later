@@ -137,7 +137,7 @@ def gen_events(con, st):
 def gen_rich(con, st):
     """부자들 페이지: 오늘 항목이 3개 안 되면 웹 검색으로 부자들의 투자 방법을 찾는 작업 1건."""
     if "rich" in tried(st, "rich") or not RICH.need_today(con): return
-    write_task("rich", ["rich"], RICH.prompt(), RICH.task_body(con))
+    write_task("rich", ["rich"], RICH.prompt(con), RICH.task_body(con))
 
 GEN = {"video": gen_video, "track": gen_track, "enrich": gen_enrich, "map": gen_map, "meaning": gen_meaning, "phase": gen_phase, "check": gen_check, "checkfill": gen_checkfill, "opinion": gen_opinion, "events": gen_events, "rich": gen_rich}
 
