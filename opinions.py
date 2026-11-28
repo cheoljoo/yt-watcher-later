@@ -30,23 +30,52 @@ def save_mine(con, vid, text):
     return True, "저장했습니다. AI 의견은 다음 새벽 실행에서 달립니다"
 
 # ── 액션(직접 해볼 것) ────────────────────────────────────────────
-def set_action(con, vid, on):
-    if not con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone(): return False, "알 수 없는 영상입니다"
-    con.execute("INSERT INTO actions(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
+# 두 종류: 동영상 액션(표 actions) / 의견 액션(표 opinion_actions — 나의 의견·AI 답변에 대해 해볼 것). 두 표는 모양이 같다.
+TABLES = {"video": "actions", "opinion": "opinion_actions"}
+
+def _flag(con, table, vid, on):
+    con.execute(f"INSERT INTO {table}(video_id,on_flag,on_at) VALUES(?,?,?) ON CONFLICT(video_id) DO UPDATE SET on_flag=excluded.on_flag, on_at=excluded.on_at",
                 (vid, 1 if on else 0, D.now()))
     con.commit()
-    return True, "직접 해볼 것으로 표시했습니다" if on else "표시를 해제했습니다 (남긴 의견은 그대로 보관됩니다)"
+    return True, "직접 해볼 것으로 표시했습니다" if on else "표시를 해제했습니다 (남긴 메모는 그대로 보관됩니다)"
 
-def save_action_comment(con, vid, text):
+def set_action(con, vid, on):
+    if not con.execute("SELECT 1 FROM videos WHERE id=?", (vid,)).fetchone(): return False, "알 수 없는 영상입니다"
+    return _flag(con, "actions", vid, on)
+
+def set_opinion_action(con, vid, on):
+    cur = get(con, vid)
+    if on and not (cur and cur["my_opinion"]): return False, "먼저 나의 의견을 저장하세요"
+    return _flag(con, "opinion_actions", vid, on)
+
+def _marked(con, table, vid):
+    return con.execute(f"SELECT 1 FROM {table} WHERE video_id=? AND on_flag=1", (vid,)).fetchone()
+
+def save_action_comment(con, vid, text, kind="video"):
     text = (text or "").strip()
     if len(text) > MAX_LEN: return False, f"{MAX_LEN}자까지 저장할 수 있습니다"
-    if not con.execute("SELECT 1 FROM actions WHERE video_id=? AND on_flag=1", (vid,)).fetchone(): return False, "액션으로 표시된 영상이 아닙니다"
-    con.execute("UPDATE actions SET comment=?, comment_at=? WHERE video_id=?", (text, D.now(), vid))
+    table = TABLES[kind]
+    if not _marked(con, table, vid): return False, "액션으로 표시된 항목이 아닙니다"
+    con.execute(f"UPDATE {table} SET comment=?, comment_at=? WHERE video_id=?", (text, D.now(), vid))
     con.commit()
     return True, "저장했습니다"
 
+def set_done(con, vid, done, kind="video"):
+    """'Action Done': 액션을 실제로 했다는 표시(다시 누르면 해제)."""
+    table = TABLES[kind]
+    if not _marked(con, table, vid): return False, "액션으로 표시된 항목이 아닙니다"
+    con.execute(f"UPDATE {table} SET done=?, done_at=? WHERE video_id=?", (1 if done else 0, D.now() if done else None, vid))
+    con.commit()
+    return True, "처리완료로 표시했습니다" if done else "처리완료 표시를 해제했습니다"
+
+def _actions_json(con, table):
+    return {r["video_id"]: {"on": bool(r["on_flag"]), "comment": r["comment"] or "", "done": bool(r["done"])} for r in con.execute(f"SELECT * FROM {table}")}
+
 def actions_json(con):
-    return {r["video_id"]: {"on": bool(r["on_flag"]), "comment": r["comment"] or ""} for r in con.execute("SELECT * FROM actions")}
+    return _actions_json(con, "actions")
+
+def opinion_actions_json(con):
+    return _actions_json(con, "opinion_actions")
 
 # ── 별표(인상 깊은 영상) ──────────────────────────────────────────
 def set_star(con, vid, on):
@@ -97,7 +126,7 @@ SCHEMA = {"type": "object", "required": ["items"], "properties": {"items": {"typ
 OP_JS = """<script>(function(){
 var API='api/',TK='ytwl_token';
 function tok(){try{return localStorage.getItem(TK)||''}catch(x){return ''}}
-function lock(box,d){box.innerHTML='';var a=document.createElement('div');a.className='op-my';a.textContent=d.my;box.appendChild(a);
+function lock(card,d){var box=card.querySelector('.op-body');box.innerHTML='';var a=document.createElement('div');a.className='op-my';a.textContent=d.my;box.appendChild(a);
  if(d.ai){var b=document.createElement('div');b.className='op-ai';var s=document.createElement('b');s.textContent='🤖 AI 의견 ';var m=document.createElement('span');m.className='meta';m.textContent='('+(d.llm||'-')+')';
   var t=document.createElement('div');t.style.whiteSpace='pre-wrap';t.textContent=d.ai;b.appendChild(s);b.appendChild(m);b.appendChild(t);box.appendChild(b);}}
 document.querySelectorAll('.op').forEach(function(box){
@@ -121,6 +150,10 @@ function post(path,body,cb){var t=tok();if(!t){t=prompt('저장용 비밀 토큰
 function paint(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'🎯 직접 해볼 것 (표시됨)':'🎯 직접 해보기'}
 document.querySelectorAll('.act-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.act-msg');m.textContent='저장 중…';
  post('action',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paint(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
+function paintO(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'💬 의견 action (표시됨)':'💬 의견 action'}
+document.querySelectorAll('.oa-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.oa-msg');m.textContent='저장 중…';
+ post('opinion_action',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paintO(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
+fetch(API+'opinion_actions').then(function(r){return r.ok?r.json():null}).then(function(all){if(all)document.querySelectorAll('.oa-btn').forEach(function(b){var d=all[b.getAttribute('data-vid')];paintO(b,!!(d&&d.on))})}).catch(function(){});
 function paintS(b,on){b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'⭐ 인상 깊은 영상 (별표됨)':'☆ 인상 깊은 영상'}
 document.querySelectorAll('.star-btn').forEach(function(b){b.addEventListener('click',function(){var on=!b.classList.contains('on'),m=b.parentNode.querySelector('.act-msg');m.textContent='저장 중…';
  post('star',{id:b.getAttribute('data-vid'),on:on},function(ok,msg){if(ok)paintS(b,on);m.textContent=(ok?'✅ ':'❌ ')+msg})})});
@@ -128,29 +161,34 @@ fetch(API+'stars').then(function(r){return r.json()}).then(function(all){documen
 fetch(API+'actions').then(function(r){return r.json()}).then(function(all){document.querySelectorAll('.act-btn').forEach(function(b){var d=all[b.getAttribute('data-vid')];paint(b,!!(d&&d.on))})}).catch(function(){});
 })();</script>"""
 
-OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}.star-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer;margin-left:6px}.star-btn.on{background:#f5b301;border-color:#f5b301;color:#222;font-weight:600}</style>"
+OP_CSS = "<style>.op{margin-top:14px;padding-top:10px;border-top:1px dashed var(--bd)}.op textarea{width:100%;min-height:70px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:transparent;color:inherit}.oa-row{margin-top:8px}.op .oa-btn{background:transparent;color:inherit;border-color:var(--bd)}.op .oa-btn.on{background:#7048e8;border-color:#7048e8;color:#fff;font-weight:600}.oa-btn{font:inherit;margin-top:6px;padding:5px 14px;border-radius:8px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.oa-btn.on{background:#7048e8;border-color:#7048e8;color:#fff;font-weight:600}.op button{margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}.op-my{white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px 10px}.op-ai{margin-top:8px;border-left:4px solid var(--ac);padding:6px 10px}.act-row{margin-top:12px;padding-top:8px;border-top:1px dashed var(--bd)}.act-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer}.act-btn.on{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:600}.star-btn{font:inherit;padding:5px 14px;border-radius:99px;border:1px solid var(--bd);background:transparent;color:inherit;cursor:pointer;margin-left:6px}.star-btn.on{background:#f5b301;border-color:#f5b301;color:#222;font-weight:600}</style>"
 
 def box(con, vid, extras=True):
-    """영상 카드 맨 아래: 나의 의견(AI 의견 전까지는 항상 편집 가능) + 있으면 AI 의견."""
+    """영상 카드 맨 아래: ① 🎯 직접 해보기·⭐ 버튼(extras) ② 나의 의견(AI 의견 전까지는 항상 편집 가능) + 있으면 AI 의견 ③ 💬 의견 action 버튼."""
+    row = ""
+    if extras:
+        on = bool(_marked(con, "actions", vid))
+        son = bool(_marked(con, "stars", vid))
+        row = (f"<div class=act-row><button type=button class='act-btn{' on' if on else ''}' data-vid='{e(vid)}' aria-pressed={'true' if on else 'false'}>"
+               f"{'🎯 직접 해볼 것 (표시됨)' if on else '🎯 직접 해보기'}</button>"
+               f"<button type=button class='star-btn{' on' if son else ''}' data-vid='{e(vid)}' aria-pressed={'true' if son else 'false'}>"
+               f"{'⭐ 인상 깊은 영상 (별표됨)' if son else '☆ 인상 깊은 영상'}</button> <span class='act-msg meta'></span>"
+               f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a><a class=meta href='highlights.html' style='margin-left:8px'>인상 깊은 영상 ›</a></div>")
     o = get(con, vid)
     my = (o["my_opinion"] if o else "") or ""
-    h = f"<div class=op data-vid='{e(vid)}'><b>💬 나의 의견</b>"
+    h = f"<div class=op data-vid='{e(vid)}'><b>💬 나의 의견</b><div class=op-body>"
     if o and o["ai_reply"]:
         h += f"<div class=op-my>{e(my)}</div><div class=op-ai><b>🤖 AI 의견</b> <span class=meta>({e(o['ai_llm'] or '-')} · {e((o['ai_at'] or '')[:10])})</span><div style='white-space:pre-wrap'>{e(o['ai_reply'])}</div></div>"
     else:
         h += f"<textarea placeholder='이 영상에 대한 내 생각을 적고 저장을 누르세요 (AI 의견은 다음 새벽에 달립니다)'>{e(my)}</textarea><button type=button class=op-save>저장</button> <span class='op-msg meta'></span>"
         if my: h += "<div class=meta>AI 의견 대기 중 — 다음 새벽 실행에서 달립니다. 그 전까지는 수정할 수 있습니다.</div>"
-    h += "</div>"
-    if not extras: return h
-    a = con.execute("SELECT on_flag FROM actions WHERE video_id=?", (vid,)).fetchone()
-    on = bool(a and a["on_flag"])
-    st = con.execute("SELECT on_flag FROM stars WHERE video_id=?", (vid,)).fetchone()
-    son = bool(st and st["on_flag"])
-    return h + (f"<div class=act-row><button type=button class='act-btn{' on' if on else ''}' data-vid='{e(vid)}' aria-pressed={'true' if on else 'false'}>"
-                f"{'🎯 직접 해볼 것 (표시됨)' if on else '🎯 직접 해보기'}</button>"
-                f"<button type=button class='star-btn{' on' if son else ''}' data-vid='{e(vid)}' aria-pressed={'true' if son else 'false'}>"
-                f"{'⭐ 인상 깊은 영상 (별표됨)' if son else '☆ 인상 깊은 영상'}</button> <span class='act-msg meta'></span>"
-                f"<a class=meta href='actions.html' style='margin-left:8px'>액션 페이지 ›</a><a class=meta href='highlights.html' style='margin-left:8px'>인상 깊은 영상 ›</a></div>")
+    h += "</div>" + oa_button(vid, bool(_marked(con, "opinion_actions", vid))) + "</div>"
+    return row + h
+
+def oa_button(vid, on):
+    """💬 의견 action 버튼(영상 카드, 홈·나와 AI 의견 목록에서 같이 씀). 동작은 OP_JS."""
+    return (f"<div class=oa-row><button type=button class='oa-btn{' on' if on else ''}' data-vid='{e(vid)}' aria-pressed={'true' if on else 'false'}>"
+            f"{'💬 의견 action (표시됨)' if on else '💬 의견 action'}</button> <span class='oa-msg meta'></span></div>")
 
 OI_CSS_BODY = """details.oi{border:1px solid var(--bd);border-radius:12px;padding:8px 12px;margin:10px 0;background:var(--card)}
 details.oi>summary{cursor:pointer;list-style:none}details.oi>summary::-webkit-details-marker{display:none}
@@ -193,7 +231,7 @@ def _head(text, n=110):
 OP_ROWS = ("""SELECT * FROM (SELECT o.*, v.title, v.channel, v.category, v.subtag, COALESCE(v.run_id, v.processed_date) AS page FROM opinions o JOIN videos v ON v.id=o.video_id
               UNION ALL SELECT o.*, r.title, r.source AS channel, '부자들' AS category, r.topic AS subtag, 'rich' AS page FROM opinions o JOIN rich_ideas r ON 'rich:'||r.id=o.video_id) """)
 
-def _item(r, filt=True, tag=""):
+def _item(r, filt=True, tag="", oa_on=False):
     """의견 한 항목(접힌 details). filt=True 이면 목록 페이지용 필터 속성과 hidden 을 붙인다."""
     has = bool(r["ai_reply"])
     attrs = (f" hidden data-ai={1 if has else 0} data-d='{e((r['my_at'] or '0000')[:10])}' data-c='{e(r['category'] or '기타')}' data-s='{e((r['category'] or '기타') + '/' + (r['subtag'] or '기타'))}'") if filt else ""
@@ -203,7 +241,10 @@ def _item(r, filt=True, tag=""):
             f"<div class=meta style='margin-top:8px'>📺 {e(r['channel'] or '')} · {e(r['category'] or '')}/{e(r['subtag'] or '')} · 내 의견 {e((r['my_at'] or '').replace('T', ' '))} · <a href='{('rich.html#r-' + e(r['video_id'][5:])) if r['video_id'].startswith('rich:') else (e(r['page']) + '.html#v-' + e(r['video_id']))}'>{'부자들 항목으로' if r['video_id'].startswith('rich:') else '영상 카드로'} 가기 ›</a></div>"
             f"<p><b>💬 나의 의견</b></p><div class=op-my style='white-space:pre-wrap'>{e(r['my_opinion'])}</div>"
             + (f"<p><b>🤖 AI 의견</b> <span class=meta>({e(r['ai_llm'] or '-')} · {e((r['ai_at'] or '')[:10])})</span></p><div class=op-ai style='white-space:pre-wrap'>{e(r['ai_reply'])}</div>"
-               if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + "</details>")
+               if has else "<p class=meta>🤖 AI 의견은 다음 새벽 실행에서 달립니다.</p>") + oa_button(r["video_id"], oa_on) + "</details>")
+
+def _oa_on(con):
+    return {r[0] for r in con.execute("SELECT video_id FROM opinion_actions WHERE on_flag=1")}
 
 
 def day_block(con, day, vids=()):
@@ -212,9 +253,10 @@ def day_block(con, day, vids=()):
     q = (OP_ROWS + "WHERE my_opinion IS NOT NULL AND my_opinion<>'' AND (substr(ai_at,1,10)=?" + (f" OR video_id IN ({','.join('?' * len(vids))})" if vids else "") + ") ORDER BY ai_at DESC, my_at DESC")
     rows = con.execute(q, (day, *vids)).fetchall()
     if not rows: return ""
-    items = "".join(_item(r, False, "<span class=meta>[오늘 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[확인한 항목의 영상]</span> ") for r in rows)
+    oa = _oa_on(con)
+    items = "".join(_item(r, False, "<span class=meta>[오늘 AI 의견 달림]</span> " if (r["ai_at"] or "")[:10] == day else "<span class=meta>[확인한 항목의 영상]</span> ", r["video_id"] in oa) for r in rows)
     return (f"<h4 style='margin:18px 0 4px'>💬 나와 AI 의견 ({len(rows)})</h4><p class=meta>오늘 새벽({e(day)}) AI 의견이 달린 것과, 그때 확인한 항목의 영상에 남긴 내 의견입니다. 눌러서 펼치세요. <a href='opinions.html'>전체 보기 ›</a></p>"
-            f"<style>{OI_CSS_BODY}</style>{items}")
+            f"<style>{OI_CSS_BODY}</style>{OP_CSS}{items}{OP_JS}")
 
 
 def build(con):
@@ -234,10 +276,11 @@ def build(con):
     recent = "<option value=all>모두</option>" + "".join(f"<option value={d}>{t}</option>" for d, t in ((7, "최근 1주일"), (30, "최근 1개월"), (90, "최근 3개월"), (180, "최근 6개월"), (365, "최근 1년"), (730, "최근 2년")))
     per = "".join(f"<option value={n}>{n}개</option>" for n in (20, 50, 100))
     ai = f"<option value=all>모두 ({len(rows)})</option><option value=yes>AI 의견 있는 것 ({n_ai})</option><option value=no>AI 의견 없는 것 ({len(rows) - n_ai})</option>"
-    items = "".join(_item(r) for r in rows)
+    oa = _oa_on(con)
+    items = "".join(_item(r, oa_on=r["video_id"] in oa) for r in rows)
     body = (f"<h1>💬 나와 AI 의견</h1><p class=meta>내가 남긴 의견 {len(rows)}개 · AI 의견 달림 {n_ai}개 · 대기 {len(rows) - n_ai}개 · 내가 저장한 날짜 최신순 · 항목을 누르면 펼쳐집니다 · <a href='index.html'>🏠 홈</a> · 의견은 각 날짜 리포트나 <a href='browse.html'>🗂️ 날짜·주제별 보기</a>의 영상 카드 맨 아래에서 씁니다</p>")
     if not rows: body += "<p class=meta>아직 남긴 의견이 없습니다. 영상 카드 맨 아래 칸에 의견을 적고 저장하면 여기에 나타납니다.</p>"
     body += (f"<div class=bar><label>🤖 AI 의견 <select id=f-ai>{ai}</select></label><label>🏷️ 주제 <select id=f-topic>{topic}</select></label>"
              f"<label>📅 기간 <select id=f-recent>{recent}</select></label><label>📄 한 페이지 <select id=f-per>{per}</select></label></div>"
              f"<p class=meta id=oi-info></p><div class=pager id=pg-top></div><div id=oi-list>{items}</div><div class=pager id=pg-bot></div>")
-    (R.OUT / "opinions.html").write_text(R.page("나와 AI 의견", OP_CSS + LIST_CSS + body + LIST_JS, "💬"), encoding="utf-8")
+    (R.OUT / "opinions.html").write_text(R.page("나와 AI 의견", OP_CSS + LIST_CSS + body + LIST_JS + OP_JS, "💬"), encoding="utf-8")

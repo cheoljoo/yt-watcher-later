@@ -57,6 +57,11 @@ def table_rows(con, t):
     return collections.Counter(tuple(r.values()) for r in rows), False
 
 
+def same_row(old, new):
+    """DB 에 칸만 새로 생긴 것(값이 비어 있음)은 변경으로 세지 않는다."""
+    return all(old[k] == v if k in old else v in (None, 0) for k, v in new.items())
+
+
 def diff_db(old, new):
     """{표: (새 행 목록, 바뀐 행 목록, 없어진 건수)}"""
     a, b = (sqlite3.connect(f"file:{p}?mode=ro", uri=True) for p in (old, new))
@@ -67,7 +72,7 @@ def diff_db(old, new):
         rows_a = table_rows(a, t)[0] if t in names(a) else ({} if keyed else collections.Counter())
         if keyed:
             added = [r for k, r in rows_b.items() if k not in rows_a]
-            changed = [r for k, r in rows_b.items() if k in rows_a and rows_a[k] != r]
+            changed = [r for k, r in rows_b.items() if k in rows_a and not same_row(rows_a[k], r)]
             removed = sum(k not in rows_b for k in rows_a)
         else:
             added, changed, removed = list((rows_b - rows_a).elements()), [], sum((rows_a - rows_b).values())
@@ -119,6 +124,8 @@ def build(diff, names, label, status, meta, problems, commits, report_url):
     opinions = [name(r["video_id"]) + (f"<div><b>나</b> {esc(r.get('my_opinion'))}</div>" if r.get("my_opinion") else "")
                 + (f"<div><b>AI</b> {esc(r.get('ai_reply'), 500)}</div>" if r.get("ai_reply") else "") for r in touched("opinions")]
     marks = [name(r["video_id"]) + small(f"🎯 직접 해보기 {'켬' if r.get('on_flag') else '끔'} {esc(r.get('comment'))}") for r in touched("actions")]
+    marks = [m + small("✅ Action Done") if r.get("done") else m for m, r in zip(marks, touched("actions"))]
+    marks += [name(r["video_id"]) + small(f"💬 의견 action {'켬' if r.get('on_flag') else '끔'}{' · ✅ Action Done' if r.get('done') else ''} {esc(r.get('comment'))}") for r in touched("opinion_actions")]
     marks += [name(r["video_id"]) + small(f"⭐ 인상 깊은 영상 {'켬' if r.get('on_flag') else '끔'}") for r in touched("stars")]
     inputs = [f"{'✅' if r.get('ok') else '❌'} {esc(r.get('type'))} · {name(r.get('vid'))}" + small(f"{esc(r.get('ts'))} {esc(r.get('msg'))}") for r in added("inbox_applied")]
     judged = [f"<b>{esc(r.get('status'))}</b> {esc(r.get('what_to_check'))}" + small(name(r.get("video_id"))) + f"<div>{esc(r.get('result'))}</div>"
@@ -134,7 +141,7 @@ def build(diff, names, label, status, meta, problems, commits, report_url):
     body = "".join([
         section("확인이 필요한 로그", [esc(p, 400) for p in problems]),
         section("새 영상", videos), section("다시 분석한 영상", analyses), section("서비스 서버에서 받은 입력", inputs),
-        section("의견", opinions), section("버튼(직접 해보기·인상 깊은 영상)", marks), section("인상 깊었던 영상 추가", marked),
+        section("의견", opinions), section("버튼(직접 해보기·의견 action·인상 깊은 영상)", marks), section("인상 깊었던 영상 추가", marked),
         section("확인 항목 판정", judged), section("새로 등록한 지표", [esc(r.get("name")) + small(esc(r.get("category"))) for r in added("indicators")]), section("소스 변경(커밋)", [esc(c) for c in commits]),
     ])
     if table:

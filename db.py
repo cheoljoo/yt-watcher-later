@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS rich_ideas(id INTEGER PRIMARY KEY AUTOINCREMENT, date
 CREATE TABLE IF NOT EXISTS inbox_applied(id TEXT PRIMARY KEY, ts TEXT, type TEXT, vid TEXT, ok INTEGER, msg TEXT, applied_at TEXT);  -- 개발 서버가 서비스 서버 inbox 에서 반영한 이벤트(중복 방지·거부 사유 기록)
 CREATE TABLE IF NOT EXISTS opinions(video_id TEXT PRIMARY KEY, my_opinion TEXT, my_at TEXT, ai_reply TEXT, ai_llm TEXT, ai_at TEXT);  -- 나의 의견(리포트 저장 버튼) / AI 의견(cron 이 채움)
 CREATE TABLE IF NOT EXISTS actions(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT, comment TEXT, comment_at TEXT);  -- '직접 해봐야 할 것' 표시(리포트 액션 버튼) + 해보고 남긴 의견
+CREATE TABLE IF NOT EXISTS opinion_actions(video_id TEXT PRIMARY KEY, on_flag INTEGER DEFAULT 1, on_at TEXT, comment TEXT, comment_at TEXT, done INTEGER DEFAULT 0, done_at TEXT);  -- '의견 action'(나의 의견·AI 답변에 대해 해볼 것). actions 와 같은 모양
 CREATE TABLE IF NOT EXISTS backlog(video_id TEXT PRIMARY KEY, title TEXT, owner TEXT, playlist_name TEXT, pos INTEGER, seen_at TEXT);  -- 재생목록에 있으나 아직 분석 안 된 영상(collect 때 갱신)
 CREATE TABLE IF NOT EXISTS analysis_runs(      -- 분석 실행 기록: 어떤 도구(engine)·모델이 이 영상을 어떻게 분석했는가 (여러 도구의 결과를 나란히 보관)
   id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT, engine TEXT, model TEXT, run_at TEXT, source TEXT,
@@ -100,6 +101,9 @@ def connect():
     for name in ("source", "symbol", "mapped_at", "alias_of", "enrich_llm", "map_llm"):
         if name not in icols: db.execute(f"ALTER TABLE indicators ADD COLUMN {name} TEXT")
     # 중복 정리: 영상은 id(URL 의 v=) 가 키라 중복 불가. 하위 표의 중복 행 제거 + 유일 인덱스, 이미 분석된 영상의 backlog 제거
+    acols = {r[1] for r in db.execute("PRAGMA table_info(actions)")}
+    for name, typ in (("done", "INTEGER DEFAULT 0"), ("done_at", "TEXT")):           # 액션을 실제로 해 봤다는 표시(Action Done)
+        if name not in acols: db.execute(f"ALTER TABLE actions ADD COLUMN {name} {typ}")
     db.execute("DELETE FROM indicator_sources WHERE rowid NOT IN (SELECT min(rowid) FROM indicator_sources GROUP BY indicator_id, video_id)")
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_indicator_sources ON indicator_sources(indicator_id, video_id)")
     db.execute("DELETE FROM backlog WHERE video_id IN (SELECT id FROM videos WHERE status='done')")

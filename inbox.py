@@ -4,14 +4,14 @@
   data/inbox/inbox-<시각>-<난수>.jsonl  개발 서버가 가져가려고 닫아 둔 파일(가져간 쪽이 ack 하면 삭제)
 
 규칙: 쌓기만 한다(덮어쓰거나 비우지 않는다). 가져갈 때는 current 를 이름만 바꿔 닫고 새 파일에 이어 쓰므로, 전송 중에 눌린 입력은 새 파일에 남는다.
-삭제는 ack 한 '닫힌 파일'만 한다. 개발 서버는 ssh 로 `inbox.py close`(닫기+목록) → scp(가져오기) → `inbox.py ack 이름…`(삭제) 를 호출한다. 이벤트 한 줄: {"id","ts","type":opinion|action|action_comment|star,"vid","text","on","host"}"""
+삭제는 ack 한 '닫힌 파일'만 한다. 개발 서버는 ssh 로 `inbox.py close`(닫기+목록) → scp(가져오기) → `inbox.py ack 이름…`(삭제) 를 호출한다. 이벤트 한 줄: {"id","ts","type":TYPES 중 하나,"vid","text","on","host"}"""
 import fcntl, json, os, pathlib, re, secrets, socket, uuid
 import db as D
 
 DIR = pathlib.Path(os.environ.get("YT_INBOX_DIR", pathlib.Path(__file__).resolve().parent / "data" / "inbox"))
 CUR = DIR / "current.jsonl"
 NAME = re.compile(r"^inbox-[0-9T:-]+-[0-9a-f]+\.jsonl$")
-TYPES = ("opinion", "action", "action_comment", "star")
+TYPES = ("opinion", "action", "action_comment", "action_done", "opinion_action", "opinion_action_comment", "opinion_action_done", "star")
 
 
 class _Lock:

@@ -50,7 +50,7 @@ flowchart LR
     subgraph SVC["🌐 서비스 서버 (psncs) — 웹 + 입력 받기"]
         direction TB
         NG["nginx<br/>reports/*.html 정적 서비스"]
-        API["opinion_server.py<br/>/save /action /star /action_comment (토큰)"]
+        API["opinion_server.py<br/>/save /action /opinion_action /star 등 (토큰)"]
         SDB[("DB 사본<br/>data/watchlater.db")]
         IN[/"inbox<br/>data/inbox/*.jsonl<br/>(사용자 입력을 한 줄씩 쌓음)"/]
         SYNC["service_sync.py<br/>cron 10분마다"]
@@ -166,7 +166,7 @@ PSNCS_PORT=22443
 | `report.py` | 일별 HTML 리포트 (카테고리 → 주제 → 업로드일 순) |
 | `stats.py` | 시청 성향 분석 페이지(`stats.html`): 많이 보는 채널·자주 나오는 인물 (DB만 사용, 리포트 생성 끝에 실행) |
 | `highlight.py` | 인상 깊은 영상 모음(`highlights.html`): 영상 카드의 ☆ 버튼으로 별표(`stars` 표)를 단 영상이 보인다. `/yt-highlight URL` 스킬이 상세 분석을 만들어 `submit` 하면 자동으로 별표가 달린다 (별표만 단 영상은 일일 리포트 요약 카드로 보임) |
-| `opinions.py` / `opinion_server.py` | 영상 카드의 '나의 의견' 칸 → 저장 서버(127.0.0.1:8650, nginx `/yt_watch_later/api/`, 토큰 `~/.config/yt-watcher-later/token`, systemd 사용자 서비스 `yt-opinion`) → `opinions`·`actions`·`stars` 표(💬 의견·🎯 직접 해보기·⭐ 인상 깊은 영상 버튼). cron 이 AI 의견을 채우고 `opinions.html`(나와 AI 의견)을 만든다 |
+| `opinions.py` / `opinion_server.py` | 영상 카드의 '나의 의견' 칸 → 저장 서버(127.0.0.1:8650, nginx `/yt_watch_later/api/`, 토큰 `~/.config/yt-watcher-later/token`, systemd 사용자 서비스 `yt-opinion`) → `opinions`·`actions`·`opinion_actions`·`stars` 표(💬 의견·🎯 직접 해보기·💬 의견 action·⭐ 인상 깊은 영상 버튼). `actions.html`(`actions.py`)은 동영상/나의 의견 액션을 주제·종류·처리완료(Action Done)·페이지당 개수로 골라 본다. cron 이 AI 의견을 채우고 `opinions.html`(나와 AI 의견)을 만든다 |
 | `export_json.py` | DB → 사람이 읽기 좋은 JSON |
 | `check.py` | 확인 항목 결과 기록, 시청일 기록 |
 | `run_daily.sh` | cron 진입점 — 항목마다 `claude -p` 를 호출하는 방식 (중복 실행 방지) |

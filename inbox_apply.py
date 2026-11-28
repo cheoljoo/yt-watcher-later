@@ -14,7 +14,7 @@
 접속·전송이 실패하면(종료코드 1) 이번 실행은 inbox 없이 계속하고 다음 실행에서 이어 받는다.
 
 순서와 안전: ① ssh `inbox.py close` — 쌓던 파일을 닫고(이름 변경) 닫힌 파일 목록을 받는다. 이후 도착하는 입력은 새 파일에 쌓인다.
-② scp 로 닫힌 파일을 가져온다. ③ 이벤트 id 로 중복을 걸러 시각순으로 opinions.py 의 저장 함수로 DB 에 반영한다(그래서 'AI 의견이 달린 항목은 수정 불가' 규칙이 그대로 적용되고, 거부된 것은 표 inbox_applied 에 사유가 남는다).
+② scp 로 닫힌 파일을 가져온다. ③ 이벤트 id 로 중복을 걸러 시각순(같은 초는 쌓인 순서)으로 opinions.py 의 저장 함수로 DB 에 반영한다(그래서 'AI 의견이 달린 항목은 수정 불가' 규칙이 그대로 적용되고, 거부된 것은 표 inbox_applied 에 사유가 남는다).
 ④ DB commit 이 끝난 뒤에만 ssh `inbox.py ack 이름…` 으로 서비스 서버의 그 파일을 지운다. 중간에 끊겨도 다음 실행이 같은 파일을 다시 받아 중복 없이 이어 반영한다."""
 import json, pathlib, re, shlex, shutil, subprocess, sys, tempfile
 import db as D, marketdata as M, opinions as O
@@ -90,12 +90,16 @@ def apply_event(con, ev):
     if t == "action": return O.set_action(con, vid, bool(ev.get("on", True)))
     if t == "star": return O.set_star(con, vid, bool(ev.get("on", True)))
     if t == "action_comment": return O.save_action_comment(con, vid, ev.get("text") or "")
+    if t == "action_done": return O.set_done(con, vid, bool(ev.get("on", True)))
+    if t == "opinion_action": return O.set_opinion_action(con, vid, bool(ev.get("on", True)))
+    if t == "opinion_action_comment": return O.save_action_comment(con, vid, ev.get("text") or "", "opinion")
+    if t == "opinion_action_done": return O.set_done(con, vid, bool(ev.get("on", True)), "opinion")
     return False, f"알 수 없는 종류 {t}"
 
 
 def apply_files(con, files):
     """받은 파일들의 이벤트를 시각순으로 반영한다. 반환: (새로 반영, 거부, 이미 반영돼 건너뜀)."""
-    evs = sorted((e for f in files for e in f["lines"]), key=lambda e: (e.get("ts", ""), e.get("id", "")))
+    evs = sorted((e for f in files for e in f["lines"]), key=lambda e: e.get("ts", ""))      # 안정 정렬: 같은 초의 입력은 파일에 쌓인 순서 유지(표시 → 처리완료 순서가 바뀌면 거부된다)
     ok_n = bad_n = dup = 0
     for ev in evs:
         if con.execute("SELECT 1 FROM inbox_applied WHERE id=?", (ev["id"],)).fetchone(): dup += 1; continue
